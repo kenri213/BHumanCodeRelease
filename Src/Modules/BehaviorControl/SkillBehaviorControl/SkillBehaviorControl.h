@@ -32,6 +32,7 @@
 #include "Representations/BehaviorControl/SkillRequest.h"
 #include "Representations/BehaviorControl/StrategyStatus.h"
 #include "Representations/Communication/TeamData.h"
+#include "Representations/Communication/GameControllerData.h"
 #include "Representations/Configuration/BallSpecification.h"
 #include "Representations/Configuration/BehaviorParameters.h"
 #include "Representations/Configuration/CalibrationRequest.h"
@@ -107,6 +108,7 @@ MODULE(SkillBehaviorControl,
   REQUIRES(FieldDimensions),
   REQUIRES(FieldRating),
   REQUIRES(FrameInfo),
+  REQUIRES(GameControllerData),
   REQUIRES(GameState),
   REQUIRES(GlobalTeammatesModel),
   REQUIRES(GlobalOpponentsModel),

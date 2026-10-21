@@ -7,6 +7,7 @@
  */
 
 #include "AudioProvider.h"
+#include "Platform/BoosterAppCommissioning.h"
 #include "Platform/SystemCall.h"
 #include "Platform/Time.h"
 #include "Platform/Thread.h"
@@ -73,7 +74,7 @@ void AudioProvider::update(AudioData& theAudioData)
   theAudioData.channels = channels;
   theAudioData.sampleRate = sampleRate;
 
-  if(captureVolume != currentCaptureVolume)
+  if(!BoosterAppCommissioning::enabled() && captureVolume != currentCaptureVolume)
   {
     if(!setCaptureVolume())
       OUTPUT_WARNING("Could not set capture volume for '" << element << "' to " << captureVolume);
@@ -134,6 +135,11 @@ void AudioProvider::update(AudioData& theAudioData)
 
 bool AudioProvider::setCaptureVolume()
 {
+  // Capture/decoding may run, but commissioning must not change shared ALSA
+  // mixer state, even if another call site is added later.
+  if(BoosterAppCommissioning::enabled())
+    return true;
+
   snd_mixer_t* mixer;
   VERIFY(!snd_mixer_open(&mixer, 0));
   VERIFY(!snd_mixer_attach(mixer, card.c_str()));

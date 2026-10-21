@@ -10,6 +10,8 @@
 #include "Representations/Communication/TeamData.h"
 #include "Tools/BehaviorControl/Strategy/BehaviorBase.h"
 #include "Tools/Modeling/BallPhysics.h"
+#include "Tools/BehaviorControl/TeamActivityPolicy.h"
+#include <cstdio>
 
 MAKE_MODULE(StrategyBehaviorControl, StrategyBehaviorControl::getExtModuleInfo);
 
@@ -69,6 +71,21 @@ void StrategyBehaviorControl::update(SkillRequest& skillRequest)
   }
 
   theBehavior.postProcess();
+
+  if(theBehaviorParameters.requireFreshTeamActivity && theFrameInfo.getTimeSince(lastTeamActivityDiagnostic) >= 2000)
+  {
+    lastTeamActivityDiagnostic = theFrameInfo.time;
+    int owner = -1;
+    for(const Agent& agent : agents)
+      if(Role::isActiveRole(agent.role) && agent.role != ActiveRole::toRole(ActiveRole::closestToTeamBall))
+        owner = agent.number;
+    std::printf("MATCH_STRATEGY pid=%d goalkeeper=%d playing=%d own_setplay=%d agents=%zu owner=%d position=%s role=%s skill=%s ball_age_ms=%d team_ball_valid=%d pose_mm_rad=%.1f,%.1f,%.3f\n",
+                theGameState.playerNumber, theGameState.ownTeam.isGoalkeeper(theGameState.playerNumber),
+                theGameState.isPlaying(), theGameState.isForOwnTeam(), agents.size(), owner,
+                TypeRegistry::getEnumName(theStrategyStatus.position), TypeRegistry::getEnumName(theStrategyStatus.role),
+                TypeRegistry::getEnumName(skillRequest.skill), theFrameInfo.getTimeSince(theBallModel.timeWhenLastSeen),
+                theTeamBallModel.isValid, theRobotPose.translation.x(), theRobotPose.translation.y(), static_cast<float>(theRobotPose.rotation));
+  }
 }
 
 Agent* StrategyBehaviorControl::updateAgents()
@@ -120,6 +137,17 @@ Agent* StrategyBehaviorControl::updateAgents()
       updateAgentByTeamMessage(agent, teamMessage);
     }
   }
+
+  // SET may seed hypothetical peers with a pose and a ball. This is useful for
+  // formation planning, but it is not proof that a peer exists or still sees it.
+  // Prune only in PLAY and before taking the self pointer / assigning positions,
+  // so search regions, role voting and the active-agent election see one roster.
+  if(theBehaviorParameters.requireFreshTeamActivity)
+    agents.erase(std::remove_if(agents.begin(), agents.end(), [&](const Agent& agent)
+    {
+      return !TeamActivityPolicy::retainAgent(true, theGameState.isPlaying(), agent.number == theGameState.playerNumber,
+                                            theFrameInfo.time, agent.timestamp, theBehaviorParameters.teamActivityTimeout);
+    }), agents.end());
 
   // The list of agents is now final for this frame, so the self pointer can be set.
   Agent* self = nullptr;

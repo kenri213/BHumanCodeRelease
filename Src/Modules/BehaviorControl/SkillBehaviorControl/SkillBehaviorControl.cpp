@@ -9,6 +9,8 @@
 #define FULL_HEADER
 #include "SkillBehaviorControl.h"
 #include "Debugging/DebugDrawings3D.h"
+#include "Platform/BoosterAppCommissioning.h"
+#include "Platform/BoosterOfficialLiveTest.h"
 #include "Platform/SystemCall.h"
 #include "Streaming/TypeRegistry.h"
 #include <string>
@@ -97,12 +99,22 @@ void SkillBehaviorControl::update(ActivationGraph&)
                      ".").c_str(), true, 0.9f);
   }
 
+  BoosterOfficialLiveTest::notePreviousPlayerState(static_cast<unsigned>(theExtendedGameState.playerStateLastFrame));
   beginFrame(theFrameInfo.time);
-  execute(root);
+  // The process-wide commissioning flag is set before Robot construction and
+  // cannot be overridden by scenario, robot configuration, or remote buttons.
+  const bool commissioning = BoosterAppCommissioning::enabled();
+  if(commissioning)
+  {
+    execute("CommissionPlayDead");
+    BoosterAppCommissioning::noteBehaviorFrame();
+  }
+  else
+    execute(root);
   endFrame();
 
-  theMotionRequest.shouldInterceptBall = theInterceptBallInformation.intercept && !theBehaviorStateInformation.remoteControlActive;
-  theMotionRequest.shouldWalkOutOfBallLine = theInterceptBallInformation.walkOutOfBallPath && !theBehaviorStateInformation.remoteControlActive;
+  theMotionRequest.shouldInterceptBall = !commissioning && theInterceptBallInformation.intercept && !theBehaviorStateInformation.remoteControlActive;
+  theMotionRequest.shouldWalkOutOfBallLine = !commissioning && theInterceptBallInformation.walkOutOfBallPath && !theBehaviorStateInformation.remoteControlActive;
 
   theLibCheck.performCheck();
 }

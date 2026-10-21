@@ -1,20 +1,58 @@
 #!/bin/bash
-# install [-d] <name> [<timezone>]
+# install [-d|-D] [--camera x5|realsense] <name> [<timezone>]
 
 # Make script path the current directory
 cd "$(dirname "$(which "$0")")"
 
 DELETE=
 DELETE_ALL=
+cameraBackend=x5
+robotName=
+timezone=
 
-if [ "$1" = "-d" ]; then
-  DELETE=1
-  shift
-elif [ "$1" = "-D" ]; then
-  DELETE=1
-  DELETE_ALL=1
-  shift
-fi
+parseOptions() {
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -d)
+        DELETE=1
+        shift
+        ;;
+      -D)
+        DELETE=1
+        DELETE_ALL=1
+        shift
+        ;;
+      --camera)
+        if [ "$#" -lt 2 ] || { [ "$2" != x5 ] && [ "$2" != realsense ]; }; then
+          echo "--camera requires x5 or realsense" >&2
+          exit 2
+        fi
+        cameraBackend=$2
+        shift 2
+        ;;
+      --)
+        shift
+        break
+        ;;
+      -*)
+        echo "Unknown installation option: $1" >&2
+        exit 2
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+  if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+    echo "usage: install [-d|-D] [--camera x5|realsense] <name> [<timezone>]" >&2
+    exit 2
+  fi
+  robotName=$1
+  timezone=${2:-}
+}
+
+# Validate before stopping services or changing the robot.
+parseOptions "$@"
 
 patchRemoteController() {
   # Create backup of libremote_controller.so if it does not exist yet
@@ -34,10 +72,48 @@ patchRemoteController() {
   fi
 }
 
+backupContainerConfig() {
+  local configFile=${1:-/opt/booster/config/containerd/config.yaml}
+  local backupFile="${configFile%.yaml}.bak"
+  if [ "$cameraBackend" = realsense ]; then
+    # Never consume a backup produced by an earlier X5 installation.
+    backupFile="${configFile%.yaml}.realsense.bak"
+  fi
+  if sudo test ! -f "$backupFile"; then
+    sudo cp "$configFile" "$backupFile"
+  elif [ -n "$DELETE" ] && [ "$cameraBackend" = x5 ]; then
+    sudo mv "$backupFile" "$configFile"
+  fi
+}
+
 configureServices() {
-  if [ -z "$DELETE" ]; then
+  local configFile=${1:-/opt/booster/config/containerd/config.yaml}
+  if [ "$cameraBackend" = realsense ] && [ -n "$DELETE" ]; then
+    # Restore only fields owned by this backend. Restoring the complete file
+    # could also change X5/ROS camera services edited after installation.
+    local backupFile="${configFile%.yaml}.realsense.bak"
+    local service enabled
+    for service in lui audio battery_daemon; do
+      enabled=$(sudo sed -n -E "/name: ${service}\$/{n; s/^ *enable: *(true|false).*\$/\\1/p;}" "$backupFile")
+      case "$enabled" in
+        true|false)
+          sudo sed -i -E "/name: ${service}\$/{n; s/enable:.*/enable: $enabled/;}" "$configFile"
+          ;;
+        *)
+          echo "Warning: cannot restore $service from the RealSense service backup" >&2
+          ;;
+      esac
+    done
+  elif [ -z "$DELETE" ]; then
     SERVICES='ros.booster.video_stream|ros.booster.vision_detection|ros.booster.auto_handeye_calib|server.perception|ros.camera|lui|audio|battery_daemon|booster_camera'
-    sudo sed -i -E "/name: ($SERVICES)/{n; s/enable:.*/enable: false/;}" /opt/booster/config/containerd/config.yaml
+    local servicePattern="name: ($SERVICES)"
+    if [ "$cameraBackend" = realsense ]; then
+      # Camera-related names differ between firmware images and can belong to
+      # X5. Do not change them here; diagnose RealSense USB ownership separately.
+      SERVICES='lui|audio|battery_daemon'
+      servicePattern="name: ($SERVICES)\$"
+    fi
+    sudo sed -i -E "/$servicePattern/{n; s/enable:.*/enable: false/;}" "$configFile"
   fi
 }
 
@@ -53,11 +129,11 @@ setPassword() {
 systemctl --user list-unit-files bhuman.service >/dev/null && systemctl --user stop bhuman.service
 
 # Set timezone
-if [ -n "$2" ]; then
-  echo "Setting timezone to $2"
+if [ -n "$timezone" ]; then
+  echo "Setting timezone to $timezone"
   # This is a hack that does not work everywhere. Daylight saving times are
   # not always accepted, so try again without the "S".
-  sudo timedatectl set-timezone "$2"
+  sudo timedatectl set-timezone "$timezone"
 fi
 
 # Handle Motion PC
@@ -91,11 +167,11 @@ if [ $USER == master ]; then
   exit 0
 fi
 
-# Set hostname to $1
-if [ -n "$1" ]; then
-  echo "Setting hostname to $1"
-  sudo sed -i "s%$(hostname)%$1%g" /etc/hosts
-  sudo hostnamectl set-hostname "$1"
+# Set hostname to the validated robot name
+if [ -n "$robotName" ]; then
+  echo "Setting hostname to $robotName"
+  sudo sed -i "s%$(hostname)%$robotName%g" /etc/hosts
+  sudo hostnamectl set-hostname "$robotName"
 fi
 
 # Create directory for status information in ram
@@ -141,12 +217,8 @@ if [ -z "$(sudo grep "/bin/systemctl" /etc/sudoers)" ]; then
   sudo bash -c 'echo "%sudo ALL=(ALL) NOPASSWD: /bin/systemctl" >>/etc/sudoers'
 fi
 
-# Create backup of config.yaml if it does not exist yet
-if sudo test ! -f /opt/booster/config/containerd/config.bak; then
-  sudo cp /opt/booster/config/containerd/config.yaml /opt/booster/config/containerd/config.bak
-elif [ -n "$DELETE" ]; then
-  sudo mv /opt/booster/config/containerd/config.bak /opt/booster/config/containerd/config.yaml
-fi
+# Back up service settings without mixing X5 and RealSense installations.
+backupContainerConfig
 
 # Disable/enable Booster services
 configureServices
@@ -243,8 +315,10 @@ if [ -f /opt/booster/robot_info.txt ]; then
     # Change remote controller topic name
     patchRemoteController
 
-    # Install cam_stream service on head
-    if [ -z "$DELETE" ]; then
+    # Only X5 installations may touch the head camera, including on uninstall.
+    if [ "$cameraBackend" = realsense ]; then
+      echo "RealSense backend: leaving X5 camera services and limits unchanged"
+    elif [ -z "$DELETE" ]; then
       chmod +x update_x5
       sudo ./update_x5
 

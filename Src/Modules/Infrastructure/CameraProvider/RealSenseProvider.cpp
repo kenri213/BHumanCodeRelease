@@ -9,9 +9,15 @@
 #include "RealSenseProvider.h"
 #include "Math/Range.h"
 #include "Platform/BHAssert.h"
+#include "Platform/BoosterAppCommissioning.h"
 #include "Platform/SystemCall.h"
 #include "Platform/Thread.h"
 #include "Platform/Time.h"
+#include <chrono>
+#include <cstring>
+#include <memory>
+#include <sstream>
+#include <stdexcept>
 #ifdef TARGET_ROBOT
 #include <librealsense2/h/rs_pipeline.h>
 #include <librealsense2/h/rs_frame.h>
@@ -141,28 +147,42 @@ void RealSenseProvider::Settings::reg()
 
 RealSenseProvider::RealSenseProvider()
 {
-  theInstance = this;
-  VERIFY(readCameraIntrinsics());
-  VERIFY(readCameraResolution());
+  if(!readCameraIntrinsics() || !readCameraResolution())
+    throw std::runtime_error("RealSenseProvider: missing camera intrinsics/resolution configuration");
+  InMapFile stream("realSenseCamera.cfg");
+  if(stream.exists())
+    stream >> streamConfig;
+  if(!streamConfig.maxFrameWaitMs || !streamConfig.maxMetadataAgeMs ||
+     (streamConfig.enableDepthKeepAlive && (streamConfig.depthWidth <= 0 || streamConfig.depthHeight <= 0 || streamConfig.depthFrameRate <= 0)))
+    throw std::runtime_error("RealSenseProvider: invalid realSenseCamera.cfg");
 
   // Initialize applied settings with a value illegal for all settings.
   std::fill(appliedSettings.begin(), appliedSettings.end(), 20000);
 
 #ifdef TARGET_ROBOT
   // Create a context object. This object owns the handles to all connected RealSense devices.
-  context = rs2_create_context(RS2_API_VERSION, &e);
-  VERIFY(ok());
-
-  // Create a pipeline to configure, start and stop camera streaming
-  pipeline = rs2_create_pipeline(context, &e);
-  VERIFY(ok());
-
-  // Create a config instance, used to specify hardware configuration
-  config = rs2_create_config(&e);
-  VERIFY(ok());
-#endif
-
+  try
+  {
+    context = rs2_create_context(RS2_API_VERSION, &e);
+    check("create context");
+    pipeline = rs2_create_pipeline(context, &e);
+    check("create pipeline");
+    config = rs2_create_config(&e);
+    check("create stream config");
+    setupCamera();
+  }
+  catch(...)
+  {
+    stopStream();
+    if(config) rs2_delete_config(config);
+    if(pipeline) rs2_delete_pipeline(pipeline);
+    if(context) rs2_delete_context(context);
+    throw;
+  }
+#else
   setupCamera();
+#endif
+  theInstance = this;
 }
 
 RealSenseProvider::~RealSenseProvider()
@@ -171,9 +191,9 @@ RealSenseProvider::~RealSenseProvider()
 
 #ifdef TARGET_ROBOT
   // Release RealSense resources.
-  rs2_delete_config(config);
-  rs2_delete_pipeline(pipeline);
-  rs2_delete_context(context);
+  if(config) rs2_delete_config(config);
+  if(pipeline) rs2_delete_pipeline(pipeline);
+  if(context) rs2_delete_context(context);
 #endif
 
   theInstance = nullptr;
@@ -182,19 +202,38 @@ RealSenseProvider::~RealSenseProvider()
 void RealSenseProvider::update(CameraImage& theCameraImage)
 {
 #ifdef TARGET_ROBOT
-  if(yuvFrameData)
-  {
-    const unsigned timestamp = static_cast<long long>(frameMetadataTimeOfArrival) > static_cast<long long>(Time::getSystemTimeBase())
-                               ? static_cast<unsigned>(frameMetadataTimeOfArrival - Time::getSystemTimeBase()) : 100000;
-    theCameraImage.setReference(cameraInfo.width / 2, cameraInfo.height, const_cast<unsigned char*>(yuvFrameData), std::max(lastImageTimestamp + 1, timestamp));
-    lastImageTimestamp = theCameraImage.timestamp;
-  }
-  else
-#endif
+  // The framework constructs the provider during its first module execution;
+  // Perception::afterFrame() has not called waitForFrameData() at that point.
+  // Bootstrap with the same bounded, validated acquisition used afterwards.
+  if(!yuvFrameData)
+    waitForFrameData2();
+  if(!yuvFrameData)
+    throw std::runtime_error("RealSenseProvider: refusing to publish a fresh timestamp on a missing color image");
+  if(!rectificationMap.empty())
   {
     theCameraImage.setResolution(cameraInfo.width / 2, cameraInfo.height);
-    theCameraImage.timestamp = Time::getCurrentSystemTime();
+    RealSenseCamera::rectifyYuyv(yuvFrameData, cameraInfo.width, cameraInfo.height, frameStride,
+                                rectificationMap, reinterpret_cast<uint8_t*>(theCameraImage[0]));
   }
+  else if(frameStride == cameraInfo.width * 2)
+    theCameraImage.setReference(cameraInfo.width / 2, cameraInfo.height, const_cast<uint8_t*>(yuvFrameData));
+  else
+  {
+    theCameraImage.setResolution(cameraInfo.width / 2, cameraInfo.height);
+    for(int y = 0; y < cameraInfo.height; ++y)
+      std::memcpy(theCameraImage[y], yuvFrameData + static_cast<std::size_t>(y) * frameStride, cameraInfo.width * 2);
+  }
+  theCameraImage.timestamp = imageTimestamp;
+  // Count only the first successful CameraImage delivery for a real frame,
+  // never stream construction, a rejected frame, or desktop placeholder data.
+  if(BoosterAppCommissioning::enabled() && imageTimestamp != lastImageTimestamp)
+    BoosterAppCommissioning::noteCameraFrame();
+  lastImageTimestamp = imageTimestamp;
+#else
+  // Desktop simulation supplies its own camera; this branch never opens USB devices.
+  theCameraImage.setResolution(cameraInfo.width / 2, cameraInfo.height);
+  theCameraImage.timestamp = Time::getCurrentSystemTime();
+#endif
 }
 
 void RealSenseProvider::update(JPEGImage& theJPEGImage)
@@ -287,8 +326,24 @@ void RealSenseProvider::applySettings()
         OUTPUT_WARNING(TypeRegistry::getEnumName(setting) << " should be inside [" << settingLimits[setting].min
                        << ", " << settingLimits[setting].max << "], but is " << settings[setting]);
 #ifdef TARGET_ROBOT
-      rs2_set_option(reinterpret_cast<rs2_options*>(sensor), options[setting], static_cast<float>(limitedSetting), &e);
-      VERIFY(ok());
+      auto* optionSensor = reinterpret_cast<rs2_options*>(sensor);
+      const bool supported = rs2_supports_option(optionSensor, options[setting], &e) != 0;
+      check("query supported RGB option");
+      const bool readOnly = supported && rs2_is_option_read_only(optionSensor, options[setting], &e) != 0;
+      check("query RGB option writability");
+      if(supported && !readOnly)
+      {
+        float minimum, maximum, step, defaultValue;
+        rs2_get_option_range(optionSensor, options[setting], &minimum, &maximum, &step, &defaultValue, &e);
+        check("query RGB option range");
+        float value = std::clamp(static_cast<float>(limitedSetting), minimum, maximum);
+        if(step > 0.f)
+          value = std::clamp(minimum + std::round((value - minimum) / step) * step, minimum, maximum);
+        rs2_set_option(optionSensor, options[setting], value, &e);
+        check("set RGB option");
+      }
+      else
+        OUTPUT_WARNING("RealSenseProvider: unsupported/read-only RGB option " << TypeRegistry::getEnumName(setting) << ", skipped");
 #endif
       appliedSettings[setting] = settings[setting];
     }
@@ -297,8 +352,11 @@ void RealSenseProvider::applySettings()
 
 void RealSenseProvider::setupCamera()
 {
-  // set resolution
+  // A stale per-robot X5 resolution must fail explicitly rather than start a wrong network/profile.
   cameraResolutionRequest.apply(cameraInfo);
+  if(cameraInfo.width <= 0 || cameraInfo.width % 2 || cameraInfo.width > 2560 || cameraInfo.height <= 0 ||
+     cameraInfo.height > 1920 || cameraInfo.frameRate <= 0)
+    throw std::runtime_error("RealSenseProvider: invalid color stream resolution");
 
   // set opening angle
   cameraInfo.openingAngleWidth = cameraIntrinsics.openingAngleWidth;
@@ -317,78 +375,108 @@ void RealSenseProvider::setupCamera()
 void RealSenseProvider::startStream()
 {
 #ifdef TARGET_ROBOT
-  // Request a specific configuration
+  rs2_device_list* rawDevices = rs2_query_devices(context, &e);
+  check("enumerate devices");
+  std::unique_ptr<rs2_device_list, decltype(&rs2_delete_device_list)> devices(rawDevices, rs2_delete_device_list);
+  const int count = rs2_get_device_count(devices.get(), &e);
+  check("count devices");
+  if(count == 0 || (count > 1 && streamConfig.serialNumber.empty()))
+    throw std::runtime_error("RealSenseProvider: no camera, or multiple cameras without an explicit serialNumber");
+
+  rs2_config_disable_all_streams(config, &e);
+  check("clear stream configuration");
+  if(!streamConfig.serialNumber.empty())
+  {
+    rs2_config_enable_device(config, streamConfig.serialNumber.c_str(), &e);
+    check("select camera serial number");
+  }
   rs2_config_enable_stream(config, RS2_STREAM_COLOR, 0, cameraInfo.width, cameraInfo.height, RS2_FORMAT_YUYV, cameraInfo.frameRate, &e);
-  VERIFY(ok());
-
-  // Depth image is required to avoid constant restart of RealSense
-  rs2_config_enable_stream(config, RS2_STREAM_DEPTH, 0, 424, 240, RS2_FORMAT_Z16, 5, &e);
-  VERIFY(ok());
-
-  Thread::getCurrentThread()->setPriority(11); // One more than Upper when waiting for an image
-
-  // Start the pipeline streaming
+  check("configure YUYV color stream");
+  // Upstream keepalive workaround; depth is NOT used for ball distance/localization.
+  if(streamConfig.enableDepthKeepAlive)
+  {
+    rs2_config_enable_stream(config, RS2_STREAM_DEPTH, 0, streamConfig.depthWidth, streamConfig.depthHeight,
+                             RS2_FORMAT_Z16, streamConfig.depthFrameRate, &e);
+    check("configure depth keepalive stream");
+  }
   pipelineProfile = rs2_pipeline_start_with_config(pipeline, config, &e);
-  VERIFY(ok());
+  check("start stream (check USB permissions, supported RGB/depth profiles, and competing camera processes)");
+  streamStarted = true;
+  readDeviceIntrinsics();
 
-  Thread::getCurrentThread()->setPriority(0);
-
-  // Get sensor to apply settings
-  rs2_device* device = rs2_pipeline_profile_get_device(pipelineProfile, &e);
-  VERIFY(ok());
-
-  // Find the sensor that represents the color camera
-  rs2_sensor_list* sensors = rs2_query_sensors(device, &e);
-  VERIFY(ok());
-
-  const int numOfSensors = rs2_get_sensors_count(sensors, &e);
-  VERIFY(ok());
-
+  std::unique_ptr<rs2_device, decltype(&rs2_delete_device)> device(rs2_pipeline_profile_get_device(pipelineProfile, &e), rs2_delete_device);
+  check("get streaming device");
+  std::unique_ptr<rs2_sensor_list, decltype(&rs2_delete_sensor_list)> sensors(rs2_query_sensors(device.get(), &e), rs2_delete_sensor_list);
+  check("query sensors");
+  const int numOfSensors = rs2_get_sensors_count(sensors.get(), &e);
+  check("count sensors");
   for(int i = 0; i < numOfSensors; ++i)
   {
-    sensor = rs2_create_sensor(sensors, i, &e);
-    VERIFY(ok());
-
-    const std::string name = rs2_get_sensor_info(sensor, RS2_CAMERA_INFO_NAME, &e);
-    VERIFY(ok());
-
-    if(name == "Stereo Module") // First sensor
+    std::unique_ptr<rs2_sensor, decltype(&rs2_delete_sensor)> candidate(rs2_create_sensor(sensors.get(), i, &e), rs2_delete_sensor);
+    check("create sensor handle");
+    std::unique_ptr<rs2_stream_profile_list, decltype(&rs2_delete_stream_profiles_list)> profiles(
+      rs2_get_stream_profiles(candidate.get(), &e), rs2_delete_stream_profiles_list);
+    check("query sensor profiles");
+    const int profileCount = rs2_get_stream_profiles_count(profiles.get(), &e);
+    check("count sensor profiles");
+    for(int j = 0; j < profileCount; ++j)
     {
-      rs2_set_option(reinterpret_cast<rs2_options*>(sensor), RS2_OPTION_EMITTER_ENABLED, 0.f, &e);
-      VERIFY(ok());
+      const auto* profile = rs2_get_stream_profile(profiles.get(), j, &e);
+      check("get sensor profile");
+      rs2_stream stream;
+      rs2_format format;
+      int index, uniqueId, fps;
+      rs2_get_stream_profile_data(profile, &stream, &format, &index, &uniqueId, &fps, &e);
+      check("read sensor profile");
+      if(stream == RS2_STREAM_COLOR)
+      {
+        if(!sensor)
+          sensor = candidate.release();
+        break;
+      }
     }
-    else if(name == "RGB Camera") // Second sensor
-      break;
-
-    rs2_delete_sensor(sensor);
-    sensor = nullptr;
+    // RGB-only operation must not issue depth/HDR control transfers. On D455
+    // these can block inside the SDK even though the color stream is active.
+    if(candidate && streamConfig.enableDepthKeepAlive)
+    {
+      auto* options = reinterpret_cast<rs2_options*>(candidate.get());
+      const bool emitter = rs2_supports_option(options, RS2_OPTION_EMITTER_ENABLED, &e) != 0;
+      check("query emitter support");
+      if(emitter)
+      {
+        rs2_set_option(options, RS2_OPTION_EMITTER_ENABLED, 0.f, &e);
+        check("disable depth emitter");
+      }
+    }
   }
-
-  ASSERT(numOfSensors && sensor);
-
-  // Free objects not needed anymore
-  rs2_delete_sensor_list(sensors);
-  rs2_delete_device(device);
+  if(!sensor)
+    throw std::runtime_error("RealSenseProvider: selected device has no color sensor");
+  std::fill(appliedSettings.begin(), appliedSettings.end(), 20000);
+  hasFrameNumber = false;
+  fallbackTimestampReported = false;
 #endif
 }
 
 void RealSenseProvider::stopStream()
 {
 #ifdef TARGET_ROBOT
-  // Free image frame
-  if(yuvFrameData)
+  releaseFrames();
+  if(sensor)
   {
-    rs2_release_frame(frame);
-    rs2_release_frame(frames);
-    yuvFrameData = nullptr;
+    rs2_delete_sensor(sensor);
+    sensor = nullptr;
   }
-
-  // Free sensor
-  rs2_delete_sensor(sensor);
-
-  // Stop the pipeline streaming
-  rs2_pipeline_stop(pipeline, &e);
-  rs2_delete_pipeline_profile(pipelineProfile);
+  if(streamStarted)
+  {
+    rs2_pipeline_stop(pipeline, &e);
+    ok();
+    streamStarted = false;
+  }
+  if(pipelineProfile)
+  {
+    rs2_delete_pipeline_profile(pipelineProfile);
+    pipelineProfile = nullptr;
+  }
 #endif
 }
 
@@ -396,63 +484,195 @@ void RealSenseProvider::waitForFrameData2()
 {
 #ifdef TARGET_ROBOT
   const bool hadFrame = yuvFrameData != nullptr;
-  if(yuvFrameData)
-  {
-    rs2_release_frame(frame);
-    rs2_release_frame(frames);
-    yuvFrameData = nullptr;
-  }
-
-  applySettings();
-
+  releaseFrames();
   if(processResolutionRequest())
   {
     stopStream();
     setupCamera();
   }
-
-  // This call waits until a new composite_frame is available
-  // composite_frame holds a set of frames. It is used to prevent frame drops
-  // The returned object should be released with rs2_release_frame(...)
+  applySettings();
+  const auto start = std::chrono::steady_clock::now();
+  acquisitionDiagnostics.beginWait(Time::getSystemTimeBase(), Time::getCurrentSystemTime());
   while(!yuvFrameData)
   {
-    frames = rs2_pipeline_wait_for_frames(pipeline, yuvFrameData ? minWaitForImage : maxWaitForImage, &e);
-    if(ok(false))
+    if(Thread::getCurrentThread() && !Thread::getCurrentThread()->isRunning())
+      return;
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+    acquisitionDiagnostics.observeHost(Time::getSystemTimeBase(), Time::getCurrentSystemTime());
+    if(elapsed >= streamConfig.maxFrameWaitMs)
     {
-      // Returns the number of frames embedded within the composite frame.
-      int numOfFrames = rs2_embedded_frames_count(frames, &e);
-      VERIFY(ok());
-
-      for(int i = numOfFrames - 1; i >= 0 && !yuvFrameData; --i)
+      const auto& d = acquisitionDiagnostics;
+      std::ostringstream evidence;
+      evidence << "RealSenseProvider: color frame timeout; no synthetic image or X5 fallback published"
+               << "; wait_ms=" << elapsed << " received=" << d.received << " color=" << d.color
+               << " duplicate=" << d.duplicate << " backward=" << d.backward << " stale=" << d.stale
+               << " metadata_not_advancing=" << d.metadataNotAdvancing << " clock_regression=" << d.clockRegression
+               << " host_not_advancing=" << d.hostNotAdvancing << " observed_clock_regressions=" << d.observedClockRegressions
+               << " last_received_valid=" << d.hasReceived << " last_received_frame=" << d.receivedNumber
+               << " received_metadata_valid=" << d.receivedMetadata << " received_arrival=" << d.receivedArrival
+               << " received_host_ms=" << d.receivedHost << " received_epoch_ms=" << d.receivedEpoch
+               << " last_timestamp_rejection=" << RealSenseCamera::rejectionName(d.lastRejection)
+               << " last_accepted_valid=" << d.hasAccepted << " last_accepted_frame=" << d.acceptedNumber
+               << " accepted_metadata_valid=" << d.acceptedMetadata << " accepted_arrival=" << d.acceptedArrival
+               << " accepted_host_ms=" << d.acceptedHost << " accepted_epoch_ms=" << d.acceptedEpoch
+               << " accepted_timestamp_ms=" << d.acceptedTimestamp << " last_image_timestamp_ms=" << lastImageTimestamp
+               << " timeout_host_ms=" << d.observedHost << " timeout_epoch_ms=" << d.observedEpoch;
+      throw std::runtime_error(evidence.str());
+    }
+    const unsigned remaining = streamConfig.maxFrameWaitMs - static_cast<unsigned>(elapsed);
+    const unsigned timeout = std::min(remaining, static_cast<unsigned>(std::max(1, hadFrame ? minWaitForImage : maxWaitForImage)));
+    const bool received = rs2_pipeline_try_wait_for_frames(pipeline, &frames, timeout, &e) != 0;
+    check("wait for frames");
+    if(!received)
+      continue;
+    ++acquisitionDiagnostics.received;
+    const int numOfFrames = rs2_embedded_frames_count(frames, &e);
+    check("count frames");
+    for(int i = numOfFrames - 1; i >= 0 && !yuvFrameData; --i)
+    {
+      frame = rs2_extract_frame(frames, i, &e);
+      check("extract frame");
+      const auto* profile = rs2_get_frame_stream_profile(frame, &e);
+      check("read frame profile");
+      rs2_stream stream;
+      rs2_format format;
+      int index, uniqueId, fps;
+      rs2_get_stream_profile_data(profile, &stream, &format, &index, &uniqueId, &fps, &e);
+      check("read frame format");
+      if(stream == RS2_STREAM_COLOR)
       {
-        frame = rs2_extract_frame(frames, i, &e);
-        VERIFY(ok());
-
-        const rs2_stream_profile* streamProfile = rs2_get_frame_stream_profile(frame, &e);
-        VERIFY(ok());
-
-        rs2_stream stream;
-        rs2_format format;
-        int index, frameRate, uniqueId;
-        rs2_get_stream_profile_data(streamProfile, &stream, &format, &index, &frameRate, &uniqueId, &e);
-        VERIFY(ok());
-
-        if(stream == RS2_STREAM_COLOR)
+        const int width = rs2_get_frame_width(frame, &e);
+        check("read color width");
+        const int height = rs2_get_frame_height(frame, &e);
+        check("read color height");
+        frameStride = rs2_get_frame_stride_in_bytes(frame, &e);
+        check("read color stride");
+        const int size = rs2_get_frame_data_size(frame, &e);
+        check("read color size");
+        if(format != RS2_FORMAT_YUYV || width != cameraInfo.width || height != cameraInfo.height ||
+           frameStride < width * 2 || size < frameStride * (height - 1) + width * 2)
+          throw std::runtime_error("RealSenseProvider: unexpected color format/dimensions/stride");
+        const auto number = rs2_get_frame_number(frame, &e);
+        check("read frame number");
+        bool metadata = rs2_supports_frame_metadata(frame, RS2_FRAME_METADATA_TIME_OF_ARRIVAL, &e) != 0;
+        check("query timestamp metadata");
+        rs2_metadata_type arrival = 0;
+        if(metadata)
         {
-          yuvFrameData = (const uint8_t*)(rs2_get_frame_data(frame, &e));
-          VERIFY(ok());
-
-          frameMetadataTimeOfArrival = rs2_get_frame_metadata(frame, RS2_FRAME_METADATA_TIME_OF_ARRIVAL, &e);
-          VERIFY(ok());
-
+          arrival = rs2_get_frame_metadata(frame, RS2_FRAME_METADATA_TIME_OF_ARRIVAL, &e);
+          metadata = ok(false) && arrival > 0;
+        }
+        const auto base = Time::getSystemTimeBase();
+        const auto now = Time::getCurrentSystemTime();
+        const auto arrivalMs = arrival > 0 ? static_cast<std::uint64_t>(arrival) : 0;
+        const auto stamp = RealSenseCamera::timestamp(metadata, arrivalMs, base, now,
+                                                     lastImageTimestamp, streamConfig.maxMetadataAgeMs);
+        acquisitionDiagnostics.noteColor(number, metadata, arrivalMs, base, now, hasFrameNumber, lastFrameNumber, stamp);
+        if((!hasFrameNumber || number > lastFrameNumber) && stamp.source != RealSenseCamera::TimestampSource::rejected)
+        {
+          yuvFrameData = static_cast<const uint8_t*>(rs2_get_frame_data(frame, &e));
+          check("get color pixels");
+          imageTimestamp = stamp.value;
+          lastFrameNumber = number;
+          hasFrameNumber = true;
+          acquisitionDiagnostics.noteAccepted(imageTimestamp);
+          if(stamp.source == RealSenseCamera::TimestampSource::hostArrival && !fallbackTimestampReported)
+          {
+            OUTPUT_WARNING("RealSenseProvider: timestamp source=hostArrival (metadata missing/invalid clock); verify camera-motion alignment");
+            fallbackTimestampReported = true;
+          }
           if(!hadFrame)
             SystemCall::say("Camera ready");
         }
       }
+      if(!yuvFrameData)
+      {
+        rs2_release_frame(frame);
+        frame = nullptr;
+      }
     }
+    if(!yuvFrameData)
+      releaseFrames();
   }
 #endif
 }
+
+#ifdef TARGET_ROBOT
+void RealSenseProvider::releaseFrames()
+{
+  if(frame) rs2_release_frame(frame);
+  if(frames) rs2_release_frame(frames);
+  frame = frames = nullptr;
+  yuvFrameData = nullptr;
+}
+
+void RealSenseProvider::check(const char* operation)
+{
+  if(e)
+  {
+    const std::string message = std::string("RealSenseProvider: ") + operation + ": " + rs2_get_error_message(e);
+    rs2_free_error(e);
+    e = nullptr;
+    throw std::runtime_error(message);
+  }
+}
+
+void RealSenseProvider::readDeviceIntrinsics()
+{
+  std::unique_ptr<rs2_stream_profile_list, decltype(&rs2_delete_stream_profiles_list)> profiles(
+    rs2_pipeline_profile_get_streams(pipelineProfile, &e), rs2_delete_stream_profiles_list);
+  check("get active stream profiles");
+  const int count = rs2_get_stream_profiles_count(profiles.get(), &e);
+  check("count active profiles");
+  for(int i = 0; i < count; ++i)
+  {
+    const auto* profile = rs2_get_stream_profile(profiles.get(), i, &e);
+    check("get active profile");
+    rs2_stream stream;
+    rs2_format format;
+    int index, uniqueId, fps;
+    rs2_get_stream_profile_data(profile, &stream, &format, &index, &uniqueId, &fps, &e);
+    check("read active profile");
+    if(stream != RS2_STREAM_COLOR)
+      continue;
+    rs2_intrinsics intrinsics;
+    rs2_get_video_stream_intrinsics(profile, &intrinsics, &e);
+    check("read factory COLOR intrinsics");
+    const RealSenseCamera::Intrinsics k{intrinsics.width, intrinsics.height, intrinsics.fx, intrinsics.fy, intrinsics.ppx, intrinsics.ppy};
+    if(!k.valid() || k.width != cameraInfo.width || k.height != cameraInfo.height ||
+       fps != cameraInfo.frameRate || format != RS2_FORMAT_YUYV)
+      throw std::runtime_error("RealSenseProvider: invalid/mismatched factory color intrinsics/profile");
+    std::array<float, 5> coefficients;
+    std::copy(std::begin(intrinsics.coeffs), std::end(intrinsics.coeffs), coefficients.begin());
+    if(!std::all_of(coefficients.begin(), coefficients.end(), [](float c) { return std::isfinite(c); }))
+      throw std::runtime_error("RealSenseProvider: non-finite distortion coefficients");
+    const bool zero = std::all_of(coefficients.begin(), coefficients.end(), [](float c) { return c == 0.f; });
+    const bool brownFamily = intrinsics.model == RS2_DISTORTION_BROWN_CONRADY ||
+                             intrinsics.model == RS2_DISTORTION_MODIFIED_BROWN_CONRADY ||
+                             intrinsics.model == RS2_DISTORTION_INVERSE_BROWN_CONRADY;
+    rectificationMap.clear();
+    if(intrinsics.model == RS2_DISTORTION_BROWN_CONRADY && !zero && streamConfig.rectifyBrownConrady)
+      rectificationMap = RealSenseCamera::brownMap(k, coefficients);
+    else if(intrinsics.model == RS2_DISTORTION_INVERSE_BROWN_CONRADY && !zero && streamConfig.rectifyBrownConrady)
+      rectificationMap = RealSenseCamera::inverseBrownMap(k, coefficients);
+    else if(!((intrinsics.model == RS2_DISTORTION_NONE && zero) || (brownFamily && zero)))
+      throw std::runtime_error(std::string("RealSenseProvider: unsupported/non-rectified RGB distortion: ") + rs2_distortion_to_string(intrinsics.model));
+
+    cameraIntrinsics.openingAngleWidth = k.openingAngleWidth();
+    cameraIntrinsics.openingAngleHeight = k.openingAngleHeight();
+    cameraIntrinsics.opticalCenter = {k.cx / k.width, k.cy / k.height};
+    cameraInfo.openingAngleWidth = cameraIntrinsics.openingAngleWidth;
+    cameraInfo.openingAngleHeight = cameraIntrinsics.openingAngleHeight;
+    cameraInfo.opticalCenter = {k.cx, k.cy};
+    cameraInfo.updateFocalLength();
+    OUTPUT_TEXT("RealSenseProvider: COLOR " << k.width << "x" << k.height << "@" << fps <<
+                " factory fx=" << k.fx << " fy=" << k.fy << " cx=" << k.cx << " cy=" << k.cy <<
+                " distortion=" << rs2_distortion_to_string(intrinsics.model) << " rectified=" << !rectificationMap.empty());
+    return;
+  }
+  throw std::runtime_error("RealSenseProvider: active pipeline has no COLOR stream");
+}
+#endif
 
 bool RealSenseProvider::ok([[maybe_unused]] const bool print)
 {

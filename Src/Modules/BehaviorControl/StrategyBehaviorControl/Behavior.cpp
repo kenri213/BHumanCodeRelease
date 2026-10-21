@@ -9,6 +9,7 @@
 #include "Behavior.h"
 #include "BallSearch.h"
 #include "ActiveRoles/ClosestToTeamBall.h"
+#include "Tools/BehaviorControl/TeamActivityPolicy.h"
 #include "ActiveRoles/FreeKickWall.h"
 #include "ActiveRoles/KickOffForward.h"
 #include "ActiveRoles/PlayBall.h"
@@ -996,7 +997,8 @@ const Agent* Behavior::determineActiveAgent(Agent& self, SetPlay::Type& setPlay,
     float ttrb = KickSelection::calcTTRP(agent.pose.inverse() * getReferencePoseOnField(ballOnField), theWalkingEngineOutput.maxSpeed);
     ttrb += agent.number == theIndirectKick.lastStriker ? 30000 : 0;
 
-    const bool ballWasSeen = agent.timestamp <= agent.timeWhenBallLastSeen + theBehaviorParameters.ballSeenThreshold;
+    const bool ballWasSeen = TeamActivityPolicy::ballAvailable(theBehaviorParameters.requireFreshTeamActivity,
+      theFrameInfo.time, agent.timestamp, agent.timeWhenBallLastSeen, theBehaviorParameters.ballSeenThreshold);
     const bool ballDisappeared = std::abs(static_cast<int>(agent.timeWhenBallDisappeared - agent.timestamp)) > ballDisappearedThreshold;
     if(useTSBD && (!ballWasSeen || ballDisappeared || agent.disagreeOnBall))
       ttrb += 3000.f + (agent.disagreeOnBall ? theFrameInfo.getTimeSince(agent.timeSinceDisagreeOnBall) : 0.f); // Teammates that do not see the ball are assumed to see it after 3 seconds.
@@ -1032,8 +1034,13 @@ const Agent* Behavior::determineActiveAgent(Agent& self, SetPlay::Type& setPlay,
   // the ball.
   const auto canBeActive = [&](const Agent& agent, bool wasActive, bool ballNeeded) -> bool
   {
+    if(theBehaviorParameters.requireFreshTeamActivity && agent.number != self.number &&
+       !TeamActivityPolicy::fresh(theFrameInfo.time, agent.timestamp,
+                                  TeamActivityPolicy::boundedTimeout(theBehaviorParameters.teamActivityTimeout)))
+      return false;
     // This checks for the ball age when the message was sent.
-    const bool ballWasSeen = agent.timestamp <= agent.timeWhenBallLastSeen + theBehaviorParameters.ballSeenThreshold;
+    const bool ballWasSeen = TeamActivityPolicy::ballAvailable(theBehaviorParameters.requireFreshTeamActivity,
+      theFrameInfo.time, agent.timestamp, agent.timeWhenBallLastSeen, theBehaviorParameters.ballSeenThreshold);
     // Agents who believe in a different ball don't compete.
     if(agent.disagreeOnBall && !Tactic::Position::isGoalkeeper(self.position))
       return false;
@@ -1057,7 +1064,8 @@ const Agent* Behavior::determineActiveAgent(Agent& self, SetPlay::Type& setPlay,
       if(!agent.isUpright)
         return false;
     }
-    if(ballNeeded && agent.timestamp > agent.timeWhenBallLastSeen + theBehaviorParameters.ballLostThreshold) // Don't be striker if the ball hasn't been seen for some time.
+    if(ballNeeded && !TeamActivityPolicy::ballAvailable(theBehaviorParameters.requireFreshTeamActivity,
+       theFrameInfo.time, agent.timestamp, agent.timeWhenBallLastSeen, theBehaviorParameters.ballLostThreshold))
       return false;
     return true;
   };

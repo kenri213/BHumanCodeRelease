@@ -7,6 +7,7 @@
  */
 
 #include "SelfLocator.h"
+#include "Platform/BoosterMatchSafety.h"
 #include "Debugging/Annotation.h"
 #include "Debugging/Plot.h"
 #include "Framework/Settings.h"
@@ -312,6 +313,7 @@ void SelfLocator::sensorUpdate()
   // Perform integration of measurements:
   unsigned int usedLines = 0;
   unsigned int usedLandmarks = 0;
+  unsigned registeredPosesForMatch = 0, registeredLandmarksForMatch = 0, registeredLinesForMatch = 0;
   std::vector<RegisteredAbsolutePoseMeasurement> absolutePoseMeasurements;
   std::vector<RegisteredLandmark> landmarks;
   std::vector<RegisteredLine> lines;
@@ -323,6 +325,7 @@ void SelfLocator::sensorUpdate()
     if(usePoses && thePerceptRegistration.totalNumberOfAvailableAbsolutePoseMeasurements > 0)
     {
       thePerceptRegistration.registerAbsolutePoseMeasurements(samplePose, absolutePoseMeasurements);
+      registeredPosesForMatch = std::max(registeredPosesForMatch, static_cast<unsigned>(absolutePoseMeasurements.size()));
       for(const auto& measuredPose : absolutePoseMeasurements)
         samples->at(i).updateByPose(measuredPose);
       numerator += validityFactorPoseMeasurement * (static_cast<float>(absolutePoseMeasurements.size()) / thePerceptRegistration.totalNumberOfAvailableAbsolutePoseMeasurements);
@@ -331,6 +334,7 @@ void SelfLocator::sensorUpdate()
     if(useLandmarks && thePerceptRegistration.totalNumberOfAvailableLandmarks > 0)
     {
       thePerceptRegistration.registerLandmarks(samplePose, landmarks);
+      registeredLandmarksForMatch = std::max(registeredLandmarksForMatch, static_cast<unsigned>(landmarks.size()));
       usedLandmarks += static_cast<unsigned int>(landmarks.size());
       for(const auto& landmark : landmarks)
         samples->at(i).updateByLandmark(landmark);
@@ -340,6 +344,7 @@ void SelfLocator::sensorUpdate()
     if(useLines && thePerceptRegistration.totalNumberOfAvailableLines > 0)
     {
       thePerceptRegistration.registerLines(samplePose, lines);
+      registeredLinesForMatch = std::max(registeredLinesForMatch, static_cast<unsigned>(lines.size()));
       usedLines += static_cast<unsigned int>(lines.size());
       for(const auto& line : lines)
       {
@@ -366,6 +371,11 @@ void SelfLocator::sensorUpdate()
       validitiesHaveBeenUpdated = true;
     }
   }
+
+  // Diagnostics of actual image registrations only; no filter/weight changes.
+  // Never count twelve hypotheses as twelve independent image frames.
+  BoosterMatchSafety::noteVisualRegistration(theFrameInfo.time, theGameState.isInitial(),
+      registeredPosesForMatch, registeredLandmarksForMatch, registeredLinesForMatch);
 
   // Apply side information:
   if(!theGameState.isPenaltyShootout())

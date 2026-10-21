@@ -8,6 +8,13 @@
 #include "Debugging/Debugging.h"
 #include "Tools/Modeling/BallPhysics.h"
 #include "Framework/Settings.h"
+#include <stdexcept>
+
+/** Optional per-robot optical-center position, shared by projection and calibration. */
+STREAMABLE(CameraMountCalibration,
+{,
+  (Vector3f)(Vector3f::Zero()) offsetNeckToCamera,
+});
 
 ConfigurationDataProvider::ConfigurationDataProvider()
 {
@@ -28,6 +35,15 @@ ConfigurationDataProvider::ConfigurationDataProvider()
   read(theMotorParameters);
   read(theRelativeFieldColorsParameters);
   read(theRobotDimensions);
+  InMapFile mountStream("cameraMountCalibration.cfg");
+  if(mountStream.exists())
+  {
+    CameraMountCalibration mount;
+    mountStream >> mount;
+    if(!mount.offsetNeckToCamera.allFinite() || mount.offsetNeckToCamera.norm() < 1.f || mount.offsetNeckToCamera.norm() > 1000.f)
+      throw std::runtime_error("ConfigurationDataProvider: invalid measured cameraMountCalibration (millimeters required)");
+    theRobotDimensions->offsetNeckToCamera = mount.offsetNeckToCamera;
+  }
   read(theStaticJointPoses);
 }
 

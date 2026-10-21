@@ -8,11 +8,13 @@
 
 // @todo Add descriptions
 
+option(CommissionPlayDead);
 option(HandleAnyPlaceDemo);
 option(HandleBallOutOfField);
 option(HandleGameState);
 option(HandleIllegalAreas);
 option(HandleJoystick);
+option(HandleMatchLocalization);
 option(HandleJoystickWalk, args((const JoystickState&) joystickState, (bool) isOmnidirectionalWalk));
 option(HandleJoystickHead, args((const JoystickState&) joystickState, (bool) isOmnidirectionalWalk, (bool) isLookDown, (bool) isKicking));
 option(HandlePenaltyKick);

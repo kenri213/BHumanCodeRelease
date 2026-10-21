@@ -11,15 +11,19 @@ set(CMAKE_SKIP_BUILD_RPATH ON)
 
 set(_buildchain_dir "${CMAKE_CURRENT_LIST_DIR}/../../Util/Buildchain")
 
-if(MACOS OR WINDOWS)
-  message(FATAL_ERROR "This file should not be included on macOS or Windows.")
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+  # The bundled macOS mold emits the same Linux/AArch64 ELF target. Use its
+  # absolute path instead of requiring a host-wide ld.mold installation.
+  set(_linker "\"${_buildchain_dir}/macOS/bin/mold\"")
+elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+  message(FATAL_ERROR "This toolchain is not configured for a Windows host.")
 else()
   set(_linker "ld.mold")
 endif()
 
 set(_booster_lib_dir "${_buildchain_dir}/Booster/lib")
 set(_booster_include_dir "${_buildchain_dir}/Booster/include")
-execute_process(COMMAND bash -c "for d in $(clang++ -c -v -E - </dev/null 2>&1 | sed -n -e '/here:/,/^End/{/here:/d; /^End/d; p}'); \
+execute_process(COMMAND bash -c "for d in $(clang++ -c -v -E - </dev/null 2>&1 | awk '/search starts here:/{inside=1;next} /End of search list/{inside=0} inside {print $1}'); \
 do [ -f $d/xmmintrin.h ] && echo $d; done | head -1" OUTPUT_VARIABLE _clang_system_include_dir)
 
 set(CMAKE_CXX_LINK_EXECUTABLE "${_linker} <LINK_FLAGS> -nostdlib --hash-style=gnu --eh-frame-hdr -m aarch64linux \

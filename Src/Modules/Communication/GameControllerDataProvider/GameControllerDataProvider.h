@@ -36,6 +36,7 @@ class GameControllerDataProvider : public GameControllerDataProviderBase
 {
   UdpComm socket; /**< The socket to communicate with the GameController. */
   unsigned whenPacketWasSent = 0; /**< When the last return packet was sent to the GameController. */
+  unsigned whenSourceRejectionWasLogged = 0;
 
   /**
    * This method is called when the representation provided needs to be updated.

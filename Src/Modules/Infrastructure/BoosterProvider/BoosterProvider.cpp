@@ -12,9 +12,13 @@
 
 #include "BoosterProvider.h"
 #include "Framework/Settings.h"
+#include "Platform/BoosterAppCommissioning.h"
+#include "Platform/BoosterOfficialLiveTest.h"
 #include "Platform/File.h"
 #include "Platform/SystemCall.h"
 #include "Platform/Time.h"
+#include <array>
+#include <stdexcept>
 #ifdef TARGET_ROBOT
 #include <fcntl.h>
 #include <linux/input.h>
@@ -30,6 +34,7 @@ namespace Main
 {
   extern booster::robot::b1::B1LocoClient client;
   extern booster::robot::light::LightControlClient ledControl;
+  void stopOfficialLiveTest();
 }
 using namespace Main;
 #endif
@@ -49,10 +54,33 @@ BoosterProvider::BoosterProvider()
       {robotStatusHandler(*reinterpret_cast<const booster_interface::msg::RobotStatusDdsMsg*>(msg));})
 #endif
 {
+#ifdef TARGET_ROBOT
+  if(BoosterAppCommissioning::enabled())
+  {
+    bool validMapping = Global::getSettings().robotType == Settings::k1 && jointMapping.size() == 22;
+    std::array<bool, Joints::numOfJoints> seen{};
+    for(const auto joint : jointMapping)
+    {
+      const auto index = static_cast<unsigned>(joint);
+      if(index >= seen.size() || seen[index])
+      {
+        validMapping = false;
+        break;
+      }
+      seen[index] = true;
+    }
+    if(!validMapping)
+    {
+      BoosterAppCommissioning::requestStop(BoosterAppCommissioning::StopReason::outputFault);
+      throw std::runtime_error("DAMPING_ONLY requires K1 and 22 distinct valid joint mappings");
+    }
+  }
+#endif
   theInstance = this;
 #ifdef TARGET_ROBOT
   lowCmdPublisher.InitChannel();
   lowStateSubscriber.InitChannel();
+  BoosterAppCommissioning::noteProviderInputReady();
   remoteControllerStateSubscriber.InitChannel();
   robotStatusSubscriber.InitChannel();
   lowCmd.cmd_type(booster_interface::msg::SERIAL);
@@ -108,6 +136,9 @@ void BoosterProvider::update([[maybe_unused]] KeyStates& theKeyStates)
   // Overlay provided key states with press of F1 in emergency mode to force switch to playDead.
   if(systemSensorData.emergencyMode && (!theMotionInfo.isMotion(MotionPhase::playDead) || theMotionRequest.motion != MotionRequest::playDead))
     theKeyStates.pressed[KeyStates::f1] = true;
+  BoosterOfficialLiveTest::noteKeyDiagnostic(theKeyStates.pressed[KeyStates::f1],
+                                            theKeyStates.pressed[KeyStates::walk], theKeyStates.pressed[KeyStates::stand],
+                                            systemSensorData.emergencyMode);
 #endif
 }
 
@@ -130,6 +161,12 @@ void BoosterProvider::update(SystemSensorData& theSystemSensorData)
 #ifdef TARGET_ROBOT
 void BoosterProvider::buttonEventHandler(const booster_interface::msg::ButtonEventMsg& buttonEvent)
 {
+  if(BoosterAppCommissioning::enabled())
+  {
+    if(buttonEvent.button() == 0 && buttonEvent.event() == booster_interface::msg::PRESS_DOWN)
+      BoosterAppCommissioning::requestStop(BoosterAppCommissioning::StopReason::f1);
+    return; // No STAND/WALK, release or long-press path can disarm the fence.
+  }
   const booster_interface::msg::ButtonEventType event = buttonEvent.event();
   if(event == booster_interface::msg::PRESS_DOWN || event == booster_interface::msg::PRESS_UP)
   {
@@ -143,6 +180,11 @@ void BoosterProvider::buttonEventHandler(const booster_interface::msg::ButtonEve
 
 void BoosterProvider::lowStateHandler(const booster_interface::msg::LowState& lowState)
 {
+  if(BoosterAppCommissioning::enabled() && !BoosterAppCommissioning::validLowState(lowState))
+  {
+    BoosterAppCommissioning::requestStop(BoosterAppCommissioning::StopReason::inputFault);
+    return;
+  }
   // During termination, the low state might be empty
   if(lowState.motor_state_serial().size() != jointMapping.size())
     return;
@@ -192,10 +234,32 @@ void BoosterProvider::lowStateHandler(const booster_interface::msg::LowState& lo
 
   jointSensorData.timestamp = Time::getRealSystemTime();
   frameDataSignal.post();
+  BoosterAppCommissioning::noteLowStateFrame();
 }
 
 void BoosterProvider::remoteControllerStateHandler(const booster_interface::msg::RemoteControllerState& remoteControllerState)
 {
+  if(BoosterAppCommissioning::enabled())
+  {
+    BoosterAppCommissioning::handleRemoteStopX(remoteControllerState, booster::robot::b1::REMOVE);
+    return;
+  }
+  if(BoosterOfficialLiveTest::enabled())
+  {
+    const unsigned rawButtons = (remoteControllerState.x() ? 1u : 0u) | (remoteControllerState.a() ? 2u : 0u)
+                                | (remoteControllerState.b() ? 4u : 0u) | (remoteControllerState.y() ? 8u : 0u)
+                                | (remoteControllerState.lb() ? 16u : 0u) | (remoteControllerState.rb() ? 32u : 0u)
+                                | (remoteControllerState.lt() ? 64u : 0u) | (remoteControllerState.rt() ? 128u : 0u)
+                                | (remoteControllerState.back() ? 256u : 0u) | (remoteControllerState.start() ? 512u : 0u)
+                                | (remoteControllerState.ls() ? 1024u : 0u) | (remoteControllerState.rs() ? 2048u : 0u);
+    BoosterOfficialLiveTest::noteRemoteDiagnostic(remoteControllerState.event(), rawButtons);
+    BoosterOfficialLiveTest::observeRemoteStopX(remoteControllerState, booster::robot::b1::REMOVE);
+    if(BoosterOfficialLiveTest::stopRequested())
+    {
+      Main::stopOfficialLiveTest();
+      return;
+    }
+  }
   SYNC;
   if(remoteControllerState.event() == booster::robot::b1::REMOVE)
     joystickState = JoystickState();
@@ -373,6 +437,44 @@ void BoosterProvider::finishFrame()
 
 void BoosterProvider::finishFrame2()
 {
+#ifdef TARGET_ROBOT
+  if(BoosterAppCommissioning::enabled())
+  {
+    BoosterAppCommissioning::sendZeroLowCommand(lowCmdPublisher, lowCmd, booster_interface::msg::SERIAL);
+    return; // Before model/calibration/ordinary control reads, and before LED RPCs.
+  }
+  if(BoosterOfficialLiveTest::stopRequested())
+  {
+    if(BoosterAppCommissioning::zeroLowCommand(lowCmd, booster_interface::msg::SERIAL))
+      VERIFY(lowCmdPublisher.Write(&lowCmd));
+    return;
+  }
+  const auto writeUnarmedLiveZero = [&]
+  {
+    struct StopOnFailedZeroOutput
+    {
+      bool completed = false;
+      ~StopOnFailedZeroOutput()
+      {
+        if(!completed)
+        {
+          BoosterOfficialLiveTest::requestStop();
+          Main::stopOfficialLiveTest();
+        }
+      }
+    } attempt;
+    if(!BoosterAppCommissioning::zeroLowCommand(lowCmd, booster_interface::msg::SERIAL)
+       || !lowCmdPublisher.Write(&lowCmd))
+      return;
+    attempt.completed = true;
+    BoosterOfficialLiveTest::noteOutput(static_cast<unsigned>(theMotionInfo.executedPhase), 0.f);
+  };
+  if(BoosterOfficialLiveTest::enabled() && !BoosterOfficialLiveTest::bodyAuthorized())
+  {
+    writeUnarmedLiveZero();
+    return; // No normal PD, torque, calibration or LED writes before fresh F1.
+  }
+#endif
   DEBUG_RESPONSE("module:BoosterProvider:segfault") *static_cast<volatile char*>(nullptr) = 0;
 
 #ifdef TARGET_ROBOT
@@ -417,7 +519,26 @@ void BoosterProvider::finishFrame2()
     motorCmd.weight(1.f);
   }
 
+  // X can arrive while this frame's unchanged official PD calculation runs.
+  if(BoosterOfficialLiveTest::stopRequested())
+  {
+    if(BoosterAppCommissioning::zeroLowCommand(lowCmd, booster_interface::msg::SERIAL))
+      VERIFY(lowCmdPublisher.Write(&lowCmd));
+    return;
+  }
+  if(BoosterOfficialLiveTest::enabled() && !BoosterOfficialLiveTest::bodyAuthorized())
+  {
+    writeUnarmedLiveZero();
+    return; // A physical F1 DOWN may revoke authority during the PD calculation.
+  }
   VERIFY(lowCmdPublisher.Write(&lowCmd));
+  if(BoosterOfficialLiveTest::enabled())
+  {
+    float frameMaxKp = 0.f;
+    for(const auto& motor : lowCmd.motor_cmd())
+      frameMaxKp = std::max(frameMaxKp, motor.kp());
+    BoosterOfficialLiveTest::noteOutput(static_cast<unsigned>(theMotionInfo.executedPhase), frameMaxKp);
+  }
 
   if(Global::getSettings().robotType == Settings::k1)
   {

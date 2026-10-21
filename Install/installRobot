@@ -8,6 +8,7 @@ bhDir="$(dirname "${baseDir}")"
 source "${baseDir}/Include/bhumanBase"
 
 robotName=""
+cameraBackend=x5
 robotIp=192.168.10.102
 motionIp=192.168.10.101
 
@@ -29,6 +30,7 @@ usage() {
   echo "  -d|--delete     : delete parts of the installation"
   echo "  -D|--deleteAll  : delete parts of the installation and the B-Human software"
   echo "  -u|--update     : update installation using the assigned ip (only K1)"
+  echo "  --camera <type> : K1 camera backend: x5 (default) or realsense"
   exit 1
 }
 
@@ -52,6 +54,14 @@ parseOptions() {
         ;;
       "-u" | "--update")
         update=true
+        ;;
+      "--camera")
+        if [ "$#" -lt 2 ] || { [ "$2" != x5 ] && [ "$2" != realsense ]; }; then
+          echo "--camera requires x5 or realsense" >&2
+          exit 2
+        fi
+        cameraBackend=$2
+        shift
         ;;
       -*)
         echo "Unknown parameter: ${1}" >&2
@@ -105,13 +115,15 @@ copyFiles() {
   ssh ${SSHOPTIONS} ${2}@${1} "mkdir -p ${copyTo}" || fatal "Can't create '${copyTo}' on robot"
   rsync ${rsyncOptions} -e "ssh ${SSHOPTIONS}" "${baseDir}/Files"/* ${2}@${1}:${copyTo} || fatal "Can't copy to '${copyTo}' on robot"
   rsync ${rsyncOptions} -e "ssh ${SSHOPTIONS}" "${bhDir}/Config/Robots/${robotName}/network.cfg" ${2}@${1}:${copyTo} || fatal "Can't copy network.cfg to '${copyTo}' on robot"
-  rsync ${rsyncOptions} -e "ssh ${SSHOPTIONS}" "${bhDir}/Util/X5Camera/update_x5" ${2}@${1}:${copyTo} || fatal "Can't copy update_x5 to '${copyTo}' on robot"
+  if [ "$cameraBackend" = x5 ]; then
+    rsync ${rsyncOptions} -e "ssh ${SSHOPTIONS}" "${bhDir}/Util/X5Camera/update_x5" ${2}@${1}:${copyTo} || fatal "Can't copy update_x5 to '${copyTo}' on robot"
+  fi
 }
 
 runInstallation() {
   message "Launching installation process."
   timezone="$(readlink /etc/localtime | sed 's%.*/zoneinfo/%%')"
-  ssh -t ${SSHOPTIONS} ${2}@${1} "chmod 755 ${copyTo}/install && bash -l -c '${copyTo}/install ${delete} ${robotName} ${timezone}'" || fatal "Installation failed"
+  ssh -t ${SSHOPTIONS} ${2}@${1} "chmod 755 ${copyTo}/install && bash -l -c '${copyTo}/install ${delete} --camera ${cameraBackend} ${robotName} ${timezone}'" || fatal "Installation failed"
 }
 
 ###############################################################################
@@ -120,10 +132,9 @@ runInstallation() {
 ##                                                                           ##
 ###############################################################################
 
-source "${bhDir}/Make/Common/setupSSH"
-
 checkApp "rsync"
 parseOptions "$@" ""
+source "${bhDir}/Make/Common/setupSSH"
 copyFiles ${robotIp} booster
 runInstallation ${robotIp} booster
 if [ ! -z "$(grep "\"${robotName}\"" "${robotsFile}" | grep -E "robotType *= *t1 *;")" ]; then

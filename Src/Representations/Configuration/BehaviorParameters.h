@@ -31,4 +31,6 @@ STREAMABLE(BehaviorParameters,
   (int) ballLostThreshold, /**< If the ball is older than this [ms], an agent can not be active (even if it was). */
   (int) ballSearchThresholdNoTeam, /**< The time after the ball was last seen to start searching for it, when the robot has no team and is playing alone. */
   (int) ballSearchThresholdTeam, /**< The time after the ball was last seen to start searching for it, when the robot has team and is not playing alone. */
+  (bool)(false) requireFreshTeamActivity, /**< During PLAY, do not reserve roles for never-heard or expired peers. Optional incomplete-roster policy. */
+  (unsigned)(10000) teamActivityTimeout, /**< Real peer-message lifetime [ms], clamped to 5..60 seconds. Not a local-ball or GC timeout. */
 });

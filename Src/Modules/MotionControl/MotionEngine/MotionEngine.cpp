@@ -14,6 +14,8 @@
 #include "Math/Rotation.h"
 #include "Modules/Infrastructure/InterThreadProviders/PerceptionProviders.h"
 #include "Platform/BHAssert.h"
+#include "Platform/BoosterAppCommissioning.h"
+#include "Platform/BoosterOfficialLiveTest.h"
 #include "Platform/SystemCall.h"
 #include "Streaming/Global.h"
 #include "Tools/Motion/MotionUtilities.h"
@@ -42,6 +44,21 @@ MotionEngine::MotionEngine()
 
 void MotionEngine::update(JointRequest& jointRequest)
 {
+  if(BoosterAppCommissioning::enabled())
+  {
+    jointRequest.angles.fill(JointAngles::off);
+    jointRequest.velocity.fill(0.f);
+    jointRequest.stiffnessData.stiffnesses.fill(0);
+    jointRequest.isTorqueControl = false;
+    jointRequest.jointStiffnessMapping = JointStiffnessMapping::regular;
+    jointRequest.timestamp = theFrameInfo.time;
+    motionInfo = MotionInfo();
+    motionInfo.executedPhase = MotionPhase::playDead;
+    armMotionInfo = ArmMotionInfo();
+    headMotionInfo.moving = false;
+    BoosterAppCommissioning::noteMotionFrame();
+    return; // No phase, continuation, get-up, walk, kick, head or arm generator.
+  }
   ASSERT(phase);
 
   const JointRequest lastRequest = jointRequest;
@@ -75,6 +92,23 @@ void MotionEngine::update(JointRequest& jointRequest)
 
   // Integrate special cases into the motion request.
   MotionRequest motionRequest = theMotionRequest;
+  // Independent of a cached Cognition/joystick request. Keep the existing walk
+  // phase's normal stopping transition, never freeze joints or force Stand on
+  // a robot that is lying, preparing, falling or getting up. Hard playDead and
+  // fall requests, body disconnect and IMU/Cognition protections still win.
+  if(BoosterRemoteStand::held() && BoosterOfficialLiveTest::bodyAuthorized())
+  {
+    // These generators run later, also at phase boundaries. No interception
+    // or ball-line escape may replace the hold, including during GetUp/Prepare.
+    motionRequest.shouldInterceptBall = false;
+    motionRequest.shouldWalkOutOfBallLine = false;
+    if((phase->type == MotionPhase::stand || phase->type == MotionPhase::walk)
+       && (motionRequest.isWalking() || motionRequest.motion == MotionRequest::stand))
+    {
+      motionRequest.motion = MotionRequest::stand;
+      motionRequest.walkSpeed = Pose2f();
+    }
+  }
   if(forceSitDown)
   {
     // Booster robots can not just sitdown, theredown downgrade into the next safer motion
@@ -89,6 +123,10 @@ void MotionEngine::update(JointRequest& jointRequest)
         motionRequest.motion = MotionRequest::playDead;
     }
   }
+
+  BoosterOfficialLiveTest::noteMotionDiagnostic(theFrameInfo.time, static_cast<unsigned>(theMotionRequest.motion),
+                                               static_cast<unsigned>(motionRequest.motion), theRobotHealth.olderPerceptionTimestamp,
+                                               theGyroOffset.offsetCheckFinished, theGyroOffset.isIMUBad, forceSitDown);
 
   // 2.1 check if a FallPhase should start ...
   const bool getUp = motionRequest.motion != MotionRequest::playDead &&

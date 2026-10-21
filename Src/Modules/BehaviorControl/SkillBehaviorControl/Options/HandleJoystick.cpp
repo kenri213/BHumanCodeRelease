@@ -9,6 +9,10 @@
  */
 
 #include "SkillBehaviorControl.h"
+#include "Platform/BoosterMatchSafety.h"
+#include "Platform/BoosterOfficialLiveTest.h"
+#include "Platform/Time.h"
+#include <cstdio>
 
 namespace HandleJoystick
 {
@@ -148,6 +152,78 @@ option((SkillBehaviorControl) HandleJoystick,
     return std::all_of(buttons.begin(), buttons.end(), [&](int button) {return joystickState.pressed(button);});
   };
 
+  // A completed fresh RB+A get-up offers manual control once, and only after
+  // every button is released and all axes are neutral. Never move on held input.
+  const bool getUpManualReady = BoosterOfficialLiveTest::bodyAuthorized()
+      && joystickState.valid && joystickState.buttons == 0
+      && std::all_of(joystickState.axes.begin(), joystickState.axes.end(),
+          [](float value) {return std::isfinite(value) && std::abs(value) <= 0.1f;})
+      && theFallDownState.state == FallDownState::upright
+      && (theMotionInfo.executedPhase == MotionPhase::stand || theMotionInfo.executedPhase == MotionPhase::walk);
+  // An explicit return to automatic always wins over a deferred get-up offer,
+  // including while this option is inactive or get-up is still finishing.
+  if(joystickState.valid && allPressed(deactivateButtons))
+    BoosterMatchSafety::cancelJoystickAfterGetUp();
+
+  // READY normally ends placement/manual control ONCE. A later explicit
+  // LT-plus remains available in READY/SET/PLAY, just like normal B-Human.
+  const unsigned handoffNow = Time::getCurrentSystemTime();
+  const bool freshHandoffGc = theGameState.gameControllerActive
+      && theGameControllerData.timeLastPacketReceived > 0
+      && handoffNow >= theGameControllerData.timeLastPacketReceived
+      && handoffNow - theGameControllerData.timeLastPacketReceived <= 2000;
+  const bool automaticEntryHandoff = BoosterMatchSafety::initialHandoff().update(BoosterMatchSafety::enabled(), freshHandoffGc,
+      theGameState.isInitial() && theGameControllerData.state == STATE_INITIAL);
+
+  if(BoosterRemoteStand::held())
+  {
+    BoosterMatchSafety::cancelJoystickAfterGetUp();
+    const bool realUprightStand = BoosterOfficialLiveTest::bodyAuthorized()
+        && !theSystemSensorData.emergencyMode && theFallDownState.state == FallDownState::upright
+        && theMotionInfo.executedPhase == MotionPhase::stand
+        && theMotionInfo.lastStandTimeStamp > 0
+        && theFrameInfo.getTimeSince(theMotionInfo.lastStandTimeStamp) >= 300;
+    if(BoosterRemoteStand::onRecoveryStanding(realUprightStand))
+      std::printf("MATCH_RECOVERY_STANDING fresh_neutral_and_LT_choice_required=1\n");
+  }
+
+  common_transition
+  {
+    if(BoosterRemoteStand::held())
+    {
+      const auto generation = BoosterRemoteStand::generation();
+      const unsigned choice = BoosterRemoteStand::resumeChoice();
+      const bool neutralAxes = std::all_of(joystickState.axes.begin(), joystickState.axes.end(),
+          [](float value) {return std::isfinite(value) && std::abs(value) <= .1f;});
+      const bool safeResume = BoosterOfficialLiveTest::bodyAuthorized() && joystickState.valid && neutralAxes
+          && !theSystemSensorData.emergencyMode && !theGameState.stopped
+          && theFallDownState.state == FallDownState::upright
+          && (theMotionInfo.executedPhase == MotionPhase::stand || theMotionInfo.executedPhase == MotionPhase::walk);
+      if(safeResume && choice && BoosterRemoteStand::tryResume(generation, choice))
+      {
+        BoosterMatchSafety::cancelJoystickAfterGetUp();
+        std::printf("REMOTE_LINK_RESUME control=%s generation=%llu\n", choice == 1 ? "manual" : "automatic",
+                    static_cast<unsigned long long>(generation));
+        if(choice == 1) goto active;
+        else goto inactive;
+      }
+      goto remoteLost;
+    }
+    if(automaticEntryHandoff)
+    {
+      BoosterMatchSafety::cancelJoystickAfterGetUp();
+      goto inactive;
+    }
+    // Retained compatibility for an optional historical confirmation node;
+    // the normal match sequence no longer calls that node or waits for RB+Y.
+    if(BoosterMatchSafety::consumeJoystickRelease())
+    {
+      BoosterMatchSafety::cancelJoystickAfterGetUp();
+      Say({.text = "Automatic control enabled"});
+      goto inactive;
+    }
+  }
+
   // Joystick control is inactive. It can only be activate if the joystick is
   // connected and the robot is not in play dead.
   initial_state(inactive)
@@ -155,12 +231,24 @@ option((SkillBehaviorControl) HandleJoystick,
     transition
     {
       if(joystickState.valid
-         && allPressed(activateButtons)
-         && !theMotionInfo.isMotion(MotionPhase::playDead))
+         && ((allPressed(activateButtons) && !theMotionInfo.isMotion(MotionPhase::playDead))
+             || BoosterMatchSafety::consumeJoystickAfterGetUp(getUpManualReady)))
       {
+        BoosterMatchSafety::cancelJoystickAfterGetUp();
         Say({.text = "Remote control activated"});
         goto active;
       }
+    }
+  }
+
+  // Physical and STOP options run first. A lost remote cannot leave old manual
+  // speeds or automatic READY/PLAY running, nor turn into an unstiff request.
+  state(remoteLost)
+  {
+    action
+    {
+      LookForward();
+      Stand();
     }
   }
 
@@ -216,7 +304,7 @@ option((SkillBehaviorControl) HandleJoystickWalk,
 
   common_transition
   {
-    if(!joystickState.valid || joystickState.pressed(standButton))
+    if(!joystickState.valid || joystickState.pressed(standButton) || walkSpeed == Pose2f())
       goto stand;
   }
 
@@ -224,7 +312,10 @@ option((SkillBehaviorControl) HandleJoystickWalk,
   {
     transition
     {
-      if(walkSpeed != Pose2f())
+      if(joystickState.valid && !joystickState.pressed(standButton)
+         && std::all_of(joystickState.axes.begin(), joystickState.axes.end(),
+             [](float value) {return std::isfinite(value);})
+         && walkSpeed != Pose2f())
       {
         if(isOmnidirectionalWalk)
           goto walkOmnidirectional;

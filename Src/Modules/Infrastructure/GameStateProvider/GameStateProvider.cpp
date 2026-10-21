@@ -10,13 +10,24 @@
 #include "Debugging/Debugging.h"
 #include "Debugging/DebugDrawings.h"
 #include "Platform/BHAssert.h"
+#include "Platform/BoosterOfficialLiveTest.h"
+#include "Platform/BoosterMatchSafety.h"
 #include "Platform/SystemCall.h"
+#include "Platform/Time.h"
+#include "Tools/BehaviorControl/CombinedLiveGetUpGesture.h"
 #include <algorithm>
 
 MAKE_MODULE(GameStateProvider);
 
 void GameStateProvider::update(GameState& gameState)
 {
+  [[maybe_unused]] const auto officialDiagnostic = BoosterOfficialLiveTest::onDiagnosticExit([&]
+  {
+    BoosterOfficialLiveTest::noteGameDiagnostic(theFrameInfo.time, static_cast<unsigned>(gameState.playerState),
+                                               theEnhancedKeyStates.pressedDuration[KeyStates::stand],
+                                               static_cast<unsigned>(theEnhancedKeyStates.hitStreak[KeyStates::walk]),
+                                               theDampingState.isDamping);
+  });
   DECLARE_DEBUG_DRAWING("module:GameStateProvider:ballCovariance", "drawingOnField");
   auto setToUnstiff = [this, &gameState]
   {
@@ -60,10 +71,21 @@ void GameStateProvider::update(GameState& gameState)
   bool mainButtonPressed = !theDampingState.isDamping && ((
                              theEnhancedKeyStates.hitStreak[KeyStates::stand] == 1 && theEnhancedKeyStates.pressedDuration[KeyStates::stand] < ignoreMainButtonPressDuration)
                            || (theEnhancedKeyStates.hitStreak[KeyStates::walk] == 1 && theEnhancedKeyStates.pressedDuration[KeyStates::walk] < ignoreMainButtonPressDuration));
+  const bool combinedPreparePermitted = BoosterMatchSafety::enabled() && BoosterOfficialLiveTest::enabled()
+    && BoosterOfficialLiveTest::bodyAuthorized() && !unstiffButtonsPressed
+    && CombinedLiveGetUpGesture::freshRecovery(theGameControllerData.state,
+         theGameControllerData.stopped,
+         CombinedLiveGetUpGesture::ownPlayerUnpenalized(theGameControllerData,
+           Global::getSettings().teamNumber, Global::getSettings().playerNumber),
+         Time::getCurrentSystemTime(), theGameControllerData.timeLastPacketReceived);
+  const bool combinedPrepareAdmission = CombinedLiveGetUpGesture::consumePrepare(
+    theFrameInfo.time, BoosterMatchSafety::epoch(), combinedPreparePermitted);
   switch(gameState.playerState)
   {
     case GameState::unstiff:
-      if(theEnhancedKeyStates.pressedDuration[KeyStates::stand] > pressDurationUnstiffToPrepare)
+      if(((!BoosterMatchSafety::enabled() || (combinedPreparePermitted && theGameControllerData.state == STATE_INITIAL))
+           && theEnhancedKeyStates.pressedDuration[KeyStates::stand] > pressDurationUnstiffToPrepare)
+         || combinedPrepareAdmission)
       {
         setToActive();
         mainButtonPressed = false;

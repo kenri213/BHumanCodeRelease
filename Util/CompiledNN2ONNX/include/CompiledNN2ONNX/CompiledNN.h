@@ -7,6 +7,9 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <filesystem>
 #include <span>
 #include <asmjit/asmjit.h>
 #include <onnxruntime_cxx_api.h>
@@ -217,10 +220,13 @@ namespace NeuralNetworkONNX
       if(settings.useTensorRT)
       {
         const OrtApi* api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
+        // Respect Main's -c project root; never write another deployment's cache.
+        const std::string cachePath = std::string(File::getBHDir()) + "/Config/NeuralNets/TensorRTCache";
+        std::filesystem::create_directories(cachePath);
         OrtTensorRTProviderOptionsV2* options;
         Ort::ThrowOnError(api->CreateTensorRTProviderOptions(&options));
         const char* keys[] = {"trt_engine_cache_enable", "trt_engine_cache_path", "trt_fp16_enable"};
-        const char* values[] = {"1", "/home/booster/Config/NeuralNets/TensorRTCache", settings.fp16 ? "1" : "0"};
+        const char* values[] = {"1", cachePath.c_str(), settings.fp16 ? "1" : "0"};
         Ort::ThrowOnError(api->UpdateTensorRTProviderOptions(options, keys, values, sizeof(keys) / sizeof(*keys)));
         Ort::ThrowOnError(api->SessionOptionsAppendExecutionProvider_TensorRT_V2(sessionOptions, options));
         api->ReleaseTensorRTProviderOptions(options);
@@ -244,7 +250,15 @@ namespace NeuralNetworkONNX
       std::copy(model.filename.begin(), model.filename.end(), filename.begin());
       session = Ort::Session(*env, filename.c_str(), sessionOptions);
 #elif defined TARGET_ROBOT
+      const auto sessionBegin = std::chrono::steady_clock::now();
+      std::fprintf(stderr, "BH_MODEL_SESSION_BEGIN path=%s trt=%d cuda=%d\n",
+                   model.filename.c_str(), settings.useTensorRT, settings.useCUDA);
+      std::fflush(stderr);
       session = Ort::Session(*env, model.filename.c_str(), sessionOptions);
+      std::fprintf(stderr, "BH_MODEL_SESSION_READY path=%s elapsed_ms=%lld\n", model.filename.c_str(),
+                   static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - sessionBegin).count()));
+      std::fflush(stderr);
 #else
       // CoreML caching does not work with parallelism
       if(settings.useCoreML)

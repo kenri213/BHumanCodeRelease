@@ -124,4 +124,5 @@ private:
   std::vector<Agent> agents; /**< The list of active agents. */
   StrategyStatus theStrategyStatus; /**< The strategy status which is provided later. */
   bool wasPenalized = false;
+  unsigned lastTeamActivityDiagnostic = 0;
 };

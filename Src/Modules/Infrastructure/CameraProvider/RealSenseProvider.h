@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "RealSenseCameraGeometry.h"
 #include "Representations/Configuration/CameraIntrinsics.h"
 #include "Representations/Configuration/CameraResolutionRequest.h"
 #include "Representations/Infrastructure/CameraImage.h"
@@ -19,6 +20,19 @@
 #ifdef TARGET_ROBOT
 #include <librealsense2/rs.h>
 #endif
+
+/** Optional per-device stream settings; the defaults preserve the T1 stream. */
+STREAMABLE(RealSenseCameraConfig,
+{,
+  (std::string)("") serialNumber,
+  (bool)(true) enableDepthKeepAlive,
+  (int)(424) depthWidth,
+  (int)(240) depthHeight,
+  (int)(5) depthFrameRate,
+  (bool)(true) rectifyBrownConrady,
+  (unsigned)(500) maxMetadataAgeMs,
+  (unsigned)(1500) maxFrameWaitMs,
+});
 
 MODULE(RealSenseProvider,
 {,
@@ -85,20 +99,32 @@ class RealSenseProvider : public RealSenseProviderBase
   Settings appliedSettings; /**< The settings that were already applied. */
   static const std::unordered_map<Setting, Setting> skipIfEnabled; /**< Skip setting an option if another option is currently enabled. */
   static const Rangei settingLimits[numOfSettings]; /**< The limits for the values of the settings. */
+  RealSenseCameraConfig streamConfig;
 
 #ifdef TARGET_ROBOT
   unsigned lastImageTimestamp = 0; /**< The timestamp of the last image received. */
   static const rs2_option options[numOfSettings]; /**< The mapping from settings to RealSense options. */
   rs2_error* e = nullptr; /**< This pointer will become non-zero if an error occurs. */
-  rs2_context* context; /**< The RealSense context. */
-  rs2_sensor* sensor; /**< The color camera. */
-  rs2_pipeline* pipeline; /**< The pipeline to configure, start, and stop camera streaming. */
-  rs2_config* config; /**< The  config instance, used to specify hardware configuration. */
-  rs2_pipeline_profile* pipelineProfile; /**< The profile of the current stream. */
-  rs2_frame* frames; /**< The frames received. */
-  rs2_frame* frame; /**< The latest frame received. */
+  rs2_context* context = nullptr; /**< The RealSense context. */
+  rs2_sensor* sensor = nullptr; /**< The color camera. */
+  rs2_pipeline* pipeline = nullptr; /**< The pipeline to configure, start, and stop camera streaming. */
+  rs2_config* config = nullptr; /**< The config instance. */
+  rs2_pipeline_profile* pipelineProfile = nullptr; /**< The profile of the current stream. */
+  rs2_frame* frames = nullptr; /**< The frames received. */
+  rs2_frame* frame = nullptr; /**< The latest color frame received. */
   const uint8_t* yuvFrameData = nullptr; /**< The image data in the latest frame received. */
-  rs2_metadata_type frameMetadataTimeOfArrival = 0; /**< The time the last frame arrived (in ms). */
+  bool streamStarted = false;
+  bool fallbackTimestampReported = false;
+  unsigned imageTimestamp = 0;
+  unsigned long long lastFrameNumber = 0;
+  bool hasFrameNumber = false;
+  RealSenseCamera::AcquisitionDiagnostics acquisitionDiagnostics;
+  int frameStride = 0;
+  std::vector<RealSenseCamera::MapPoint> rectificationMap;
+
+  void readDeviceIntrinsics();
+  void releaseFrames();
+  void check(const char* operation); /**< Throw on SDK error in Release as well as Develop. */
 #endif
 
   /**

@@ -1,0 +1,40 @@
+cmake_minimum_required(VERSION 3.16)
+project(K1Commissioning LANGUAGES CXX)
+
+enable_testing()
+add_executable(k1_observer_options_test ../../Tests/K1Commissioning/options_test.cpp)
+target_compile_features(k1_observer_options_test PRIVATE cxx_std_17)
+target_include_directories(k1_observer_options_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_options(k1_observer_options_test PRIVATE -Wall -Wextra -Werror -pedantic)
+add_test(NAME observer_options COMMAND k1_observer_options_test)
+add_executable(k1_observer_aggregate_test ../../Tests/K1Commissioning/aggregate_test.cpp)
+target_compile_features(k1_observer_aggregate_test PRIVATE cxx_std_17)
+target_include_directories(k1_observer_aggregate_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_options(k1_observer_aggregate_test PRIVATE -Wall -Wextra -Werror -pedantic)
+add_test(NAME observer_aggregates COMMAND k1_observer_aggregate_test)
+
+option(K1_BUILD_DDS_OBSERVER "Build the receive-only ARM64 Linux DDS diagnostic" OFF)
+set(K1_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../Util/BoosterRoboticsSDK" CACHE PATH "SDK headers and libraries")
+set(K1_SDK_LIBRARY_DIR "${K1_SDK_ROOT}/lib/LinuxArm64" CACHE PATH "ARM64 Linux SDK library directory")
+if(K1_BUILD_DDS_OBSERVER)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+    message(FATAL_ERROR "The DDS diagnostic requires ARM64 Linux or an explicitly configured cross toolchain")
+  endif()
+  find_package(Threads REQUIRED)
+  foreach(library libbooster_robotics_sdk.a libfastrtps.so libfastcdr.so libfoonathan_memory-0.7.3.a)
+    if(NOT EXISTS "${K1_SDK_LIBRARY_DIR}/${library}")
+      message(FATAL_ERROR "Missing SDK dependency: ${K1_SDK_LIBRARY_DIR}/${library}")
+    endif()
+  endforeach()
+  add_executable(k1_dds_observer dds_observer.cpp)
+  target_compile_features(k1_dds_observer PRIVATE cxx_std_20)
+  target_include_directories(k1_dds_observer SYSTEM PRIVATE "${K1_SDK_ROOT}/include")
+  target_compile_options(k1_dds_observer PRIVATE -Wall -Wextra -Werror -pedantic)
+  target_link_libraries(k1_dds_observer PRIVATE
+    "${K1_SDK_LIBRARY_DIR}/libbooster_robotics_sdk.a"
+    "${K1_SDK_LIBRARY_DIR}/libfastrtps.so"
+    "${K1_SDK_LIBRARY_DIR}/libfastcdr.so"
+    "${K1_SDK_LIBRARY_DIR}/libfoonathan_memory-0.7.3.a"
+    Threads::Threads "${CMAKE_DL_LIBS}")
+  set_target_properties(k1_dds_observer PROPERTIES SKIP_BUILD_RPATH TRUE)
+endif()

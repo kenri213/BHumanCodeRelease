@@ -8,6 +8,7 @@
 
 #include "GameControllerDataProvider.h"
 #include "Framework/Settings.h"
+#include "Platform/BoosterMatchSafety.h"
 
 #ifdef WINDOWS
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
@@ -20,6 +21,7 @@
 #endif
 
 #include <cstring>
+#include <cstdio>
 
 MAKE_MODULE(GameControllerDataProvider);
 
@@ -37,6 +39,17 @@ void GameControllerDataProvider::update(GameControllerData& theGameControllerDat
   unsigned from;
   while((size = socket.read(reinterpret_cast<char*>(&buffer), sizeof(buffer), from)) > 0)
   {
+    // UdpComm returns IPv4 in host order. Reject before changing target, age,
+    // packet contents, or the INITIAL confirmation epoch.
+    if(!BoosterMatchSafety::acceptGameControllerSource(from))
+    {
+      if(!whenSourceRejectionWasLogged || theFrameInfo.getTimeSince(whenSourceRejectionWasLogged) >= 5000)
+      {
+        whenSourceRejectionWasLogged = theFrameInfo.time;
+        std::printf("MATCH_GC_REJECT source_host=%08x allowed=192.168.50.37\n", from);
+      }
+      continue;
+    }
     if(size == sizeof(buffer) &&
        !std::memcmp(&buffer, GAMECONTROLLER_STRUCT_HEADER, 4) &&
        buffer.version == GAMECONTROLLER_STRUCT_VERSION &&
@@ -50,6 +63,7 @@ void GameControllerDataProvider::update(GameControllerData& theGameControllerDat
       static_cast<RoboCup::RoboCupGameControlData&>(theGameControllerData) = buffer;
       theGameControllerData.timeLastPacketReceived = socket.getLastReadTimestamp();
       theGameControllerData.isTrueData = false;
+      BoosterMatchSafety::noteGcInitial(buffer.state == STATE_INITIAL);
     }
   }
 
