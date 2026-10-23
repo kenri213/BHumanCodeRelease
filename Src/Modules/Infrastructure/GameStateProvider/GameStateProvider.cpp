@@ -12,6 +12,7 @@
 #include "Platform/BHAssert.h"
 #include "Platform/BoosterOfficialLiveTest.h"
 #include "Platform/BoosterMatchSafety.h"
+#include "Platform/BoosterRemoteStand.h"
 #include "Platform/SystemCall.h"
 #include "Platform/Time.h"
 #include "Tools/BehaviorControl/CombinedLiveGetUpGesture.h"
@@ -67,7 +68,24 @@ void GameStateProvider::update(GameState& gameState)
     timeWhenStateNotAfterHalf = theFrameInfo.time;
 
   gameState.whistled = false;
-  const bool unstiffButtonsPressed = theEnhancedKeyStates.pressed[KeyStates::f1] || theDampingState.isDamping;
+  // BEGIN_OFFICIAL_F1_GENERATION
+  // Consume a real F1 DOWN generation once, even if DOWN/LONG/UP all arrived
+  // between Cognition frames. Authorization alone must not revive old play.
+  bool officialF1GenerationChanged = false;
+  if(BoosterOfficialLiveTest::officialButtonMode())
+  {
+    const unsigned generation = BoosterOfficialLiveTest::modeToken() & ~7u;
+    officialF1GenerationChanged = generation != lastOfficialF1Generation;
+    lastOfficialF1Generation = generation;
+    // Retire an already-held remote choice from the previous body epoch.
+    // A normal first F1 with no hold must not acquire a new Stand lock.
+    if(officialF1GenerationChanged && BoosterRemoteStand::held())
+      BoosterRemoteStand::latchDisconnect();
+  }
+  // END_OFFICIAL_F1_GENERATION
+  const bool unstiffButtonsPressed = theEnhancedKeyStates.pressed[KeyStates::f1] || theDampingState.isDamping
+      || (BoosterOfficialLiveTest::officialButtonMode() && !BoosterOfficialLiveTest::bodyAuthorized())
+      || officialF1GenerationChanged;
   bool mainButtonPressed = !theDampingState.isDamping && ((
                              theEnhancedKeyStates.hitStreak[KeyStates::stand] == 1 && theEnhancedKeyStates.pressedDuration[KeyStates::stand] < ignoreMainButtonPressDuration)
                            || (theEnhancedKeyStates.hitStreak[KeyStates::walk] == 1 && theEnhancedKeyStates.pressedDuration[KeyStates::walk] < ignoreMainButtonPressDuration));

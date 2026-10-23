@@ -1,4 +1,4 @@
-"""Ensure the minimal v4 candidate retains exact v2 native football/reentry."""
+"""Retain v4 native football/reentry while explicitly migrating resident F1."""
 import hashlib
 from pathlib import Path
 import subprocess
@@ -6,6 +6,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = "48fd18a05834b6f2165ef28ad47256655c50c7e9"
+V4 = "48ce90279f27f8a51680661f448184fb2f2ecb9b"
+F1_SOURCE = "1cf8bf14a6cc079999b807a946d6df31c528ed16"
 MAIN = "Src/Apps/Booster/Main.cpp"
 NATIVE = (
     "Src/Modules/Modeling/SelfLocator/SelfLocator.cpp",
@@ -20,18 +22,41 @@ NATIVE = (
 )
 
 
-def original(path):
-    return subprocess.check_output(["git", "show", BASE + ":" + path], cwd=ROOT)
+def original(path, commit=BASE):
+    return subprocess.check_output(["git", "show", commit + ":" + path], cwd=ROOT)
+
+
+def block(source, marker):
+    start = source.index(marker)
+    cursor = source.index("{", start) + 1
+    depth = 1
+    while depth:
+        depth += (source[cursor] == "{") - (source[cursor] == "}")
+        cursor += 1
+    return source[start:cursor]
 
 
 class NativeRetainedV4Tests(unittest.TestCase):
     def test_native_reentry_motion_and_control_files_are_exact_v2(self):
         for path in NATIVE:
             with self.subTest(path=path):
-                self.assertEqual((ROOT / path).read_bytes(), original(path))
+                current = (ROOT / path).read_bytes()
+                if path.endswith("Options/HandlePhysicalRobot.cpp"):
+                    # F1 no longer destroys the process. Only replace that old
+                    # transaction lifetime; every normal Pickup branch stays.
+                    start = current.index(b"  // BEGIN_OFFICIAL_F1_PICKUP_LIFECYCLE\n")
+                    end_marker = b"  // END_OFFICIAL_F1_PICKUP_LIFECYCLE\n"
+                    end = current.index(end_marker, start) + len(end_marker)
+                    hook = current[start:end]
+                    self.assertIn(b"officialButtonMode()", hook)
+                    self.assertIn(b"!liveAuthorized || theGameState.playerState == GameState::unstiff", hook)
+                    self.assertIn(b"physicalPickupGate = BoosterPickupControl::Gate{};", hook)
+                    current = current[:start] + current[end:]
+                self.assertEqual(current, original(path))
 
-    def test_main_only_adds_the_fixed_log_directory_helper(self):
+    def test_main_keeps_exact_987_identity_log_preparation_and_996_scope(self):
         source = (ROOT / MAIN).read_text()
+        base = original(MAIN, V4).decode()
         additions = (
             '#include "Platform/BoosterMatchLogDirectory.h"\n',
             '      BoosterMatchLogDirectory::prepare987();\n',
@@ -39,8 +64,20 @@ class NativeRetainedV4Tests(unittest.TestCase):
         )
         for addition in additions:
             self.assertEqual(source.count(addition), 1)
-            source = source.replace(addition, "")
-        self.assertEqual(source.encode(), original(MAIN))
+        for marker in ("static bool match987IdentityAllowed(", "if(officialLiveTest)\n    {"):
+            self.assertEqual(block(source, marker), block(base, marker))
+        scope = block(source, "if(officialMatch987)\n    {")
+        self.assertEqual(scope.count("BoosterOfficialLiveTest::enableOfficialButtonMode();"), 1)
+        self.assertLess(scope.index("match987IdentityAllowed"), scope.index("enableOfficialButtonMode();"))
+        self.assertNotIn("--k1-977-match", source)
+
+    def test_real_resident_f1_main_methods_match_the_pinned_source(self):
+        source = (ROOT / MAIN).read_text()
+        official = original(MAIN, F1_SOURCE).decode()
+        for marker in ("int changeMode(const booster::robot::RobotMode mode)",
+                       "static void buttonEventHandler(const void* msg)"):
+            with self.subTest(marker=marker):
+                self.assertEqual(block(source, marker), block(official, marker))
 
     def test_no_v3_session_geometry_or_custom_reentry_markers_exist(self):
         self.assertFalse((ROOT / "Src/Libs/Platform/BoosterPickupReentry.h").exists())
@@ -52,14 +89,17 @@ class NativeRetainedV4Tests(unittest.TestCase):
                     with self.subTest(path=str(path.relative_to(ROOT)), marker=marker):
                         self.assertNotIn(marker, source)
 
-    def test_only_two_existing_production_files_changed(self):
+    def test_only_explicit_official_f1_production_paths_change_from_v4(self):
         changed = subprocess.check_output(
-            ["git", "diff", "--name-only", BASE, "--", "Src", "Config", "Make"], cwd=ROOT, text=True
+            ["git", "diff", "--name-only", V4, "--", "Src", "Config", "Make"], cwd=ROOT, text=True
         ).splitlines()
-        # Before staging git omits the new helper; after staging/committing it
-        # includes it. Keep the same production boundary in both cases.
-        self.assertEqual(set(changed) - {"Src/Libs/Platform/BoosterMatchLogDirectory.h"},
-                         {MAIN, "Src/Libs/Platform/BoosterPickupControl.h"})
+        self.assertEqual(set(changed), {
+            MAIN, "Src/Libs/Platform/BoosterOfficialLiveTest.h",
+            "Src/Modules/Infrastructure/BoosterProvider/BoosterProvider.cpp",
+            "Src/Modules/Infrastructure/GameStateProvider/GameStateProvider.cpp",
+            "Src/Modules/Infrastructure/GameStateProvider/GameStateProvider.h",
+            "Src/Modules/BehaviorControl/SkillBehaviorControl/Options/HandlePhysicalRobot.cpp",
+        })
 
     def test_verified_minimal_helpers_are_exact(self):
         expected = {

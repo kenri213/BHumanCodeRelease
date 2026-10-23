@@ -25,6 +25,19 @@ option((SkillBehaviorControl) HandlePhysicalRobot,
 #if defined(TARGET_ROBOT) && defined(LINUX)
   const bool liveMode = BoosterOfficialLiveTest::enabled();
   const bool liveAuthorized = BoosterOfficialLiveTest::bodyAuthorized();
+  // BEGIN_OFFICIAL_F1_PICKUP_LIFECYCLE
+  // Resident F1 has no process restart to discard the previous Pickup gate.
+  // GameStateProvider consumes the physical F1 generation into Unstiff even
+  // when DOWN/LONG/UP occurred between Cognition frames. Native RB+X also
+  // uses Unstiff. Discard only the old transaction; grant no body action.
+  if(BoosterOfficialLiveTest::officialButtonMode()
+     && (!liveAuthorized || theGameState.playerState == GameState::unstiff))
+  {
+    physicalPickupGate = BoosterPickupControl::Gate{};
+    BoosterPickupControl::cancelAutomaticRelease();
+    BoosterPickupControl::setHeld(false);
+  }
+  // END_OFFICIAL_F1_PICKUP_LIFECYCLE
 #else
   const bool liveMode = false;
   const bool liveAuthorized = false;

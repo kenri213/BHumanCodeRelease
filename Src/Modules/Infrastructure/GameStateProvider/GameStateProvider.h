@@ -151,6 +151,7 @@ class GameStateProvider : public GameStateProviderBase
   static GameState::PlayerState convertPenaltyToPlayerState(decltype(RoboCup::RobotInfo::penalty) penalty);
 
   GameState::State lastGameControllerState = GameState::beforeHalf; /**< The last state sent by the GameController. */
+  unsigned lastOfficialF1Generation = 0; /**< Physical F1 DOWN consumed once across resident mode changes. */
   bool gameStateOverridden = false; /**< Whether the game state is currently overridden (i.e. not the state received by the GameController). */
   unsigned timeWhenStateNotAfterHalf = 0; /**< Last timestamp when the state was not "after half". */
   RingBuffer<Vector2f, 30> ballPositions; /**< Buffer of (robot-relative) ball positions to check whether the ball moved. */

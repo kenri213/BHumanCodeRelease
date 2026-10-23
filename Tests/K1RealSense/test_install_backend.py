@@ -108,6 +108,7 @@ class InstallCameraBackendTests(unittest.TestCase):
                         'baseDir="$1/Install"; bhDir="$1"; calls="$2"; cameraBackend="$3"\n'
                         'SSHOPTIONS=; rsyncOptions=\n'
                         'message() { :; }; fatal() { exit 90; }\n'
+                        'cat() { printf "offline-public-key-fixture\\n"; }\n'
                         'sshpass() { printf "auth\\n" >>"$calls"; }\n'
                         'ssh() { printf "ssh\\n" >>"$calls"; }\n'
                         'rsync() { case "$*" in *X5Camera/update_x5*) '

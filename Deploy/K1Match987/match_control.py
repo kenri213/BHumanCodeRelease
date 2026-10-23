@@ -2,7 +2,7 @@
 """987 match controller. Target-bound offline release; installation is separate.
 
 No fixed running/lease deadline. A start request never uses Damping as a test.
-Stop/X/F1/APP exit may remove support: keep people clear and support the robot.
+Physical F1 changes emergency mode while APP stays resident. Explicit stop/APP exit may remove support.
 Default is plan only; production installation is a separate reviewed operation.
 """
 import argparse
@@ -27,7 +27,7 @@ PROJECT=Path('/home/booster/Workspace/BHuman_987_Match_20261023')
 OLD_ROOT=Path('/opt/booster/bhuman_trial_987_20261023_v2')
 SERIAL='1424725033885'
 CORE_SHA='0cf7b635e2138ad34b195efdd97e96f08b48f8ff521ce15b6b55feba72b0e78a'
-APP_SHA='2ea1b44b0b600aad34d4860d5686a43f51752be82ade617dd09599bb08e67953'
+APP_SHA='a06145fa7c4ba989afcea08ff8c9a19797c44293e99401b185e92e5c6bf4ca8d' # Local frozen candidate; not deployed or physically tested.
 MODE_QUERY_SHA='9983299bf74aa0839b163e9e314dc31de6cc830f9ffe739431e9f3dde3f19840'
 OBSERVER_SHA='bb4cd4bfb128f08c314a965f2fb0d23661a64aad08a722996b462add026c639c'
 DAMPING_SHA='94ac4ff09c33faa2290cc32c4149301fd0b7322139e4732aede9a192bb619d5e'
@@ -170,7 +170,7 @@ class Controller:
             print('WARNING: STARTUP_TIMELINE evidence write failed ('+type(write_error).__name__+')',file=sys.stderr)
     def running_start(self,previous):
         # Read-only repeat request: NEVER stop/restart a possibly standing APP.
-        # Do not hold match.lock while waiting; an actual X/F1 exit must be able
+        # Do not hold match.lock while waiting; an actual APP exit must be able
         # to enter the independent systemd recovery unit immediately.
         print('STARTUP already_running: checking new Cognition only; no service or mode changes',flush=True)
         result={'phase':'RUNNING','running':True,'reused_running_process':True,

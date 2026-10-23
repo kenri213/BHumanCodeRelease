@@ -170,7 +170,8 @@ class EmergencyHandler : public Thread
 
   int changeMode(const booster::robot::RobotMode mode)
   {
-    if(BoosterOfficialLiveTest::enabled() && BoosterOfficialLiveTest::stopRequested()
+    const unsigned permission = BoosterOfficialLiveTest::modeToken();
+    if(BoosterOfficialLiveTest::enabled() && !BoosterOfficialLiveTest::customModeAllowed(permission)
        && mode != booster::robot::RobotMode::kDamping)
       return -1;
     if(BoosterAppCommissioning::enabled() && mode != booster::robot::RobotMode::kDamping)
@@ -181,9 +182,9 @@ class EmergencyHandler : public Thread
     if(!commissionOnly.load())
     {
       const int result = client.ChangeMode(mode);
-      // A Custom RPC already in flight when X was pressed must not re-arm the
-      // body after a concurrent Damping request completed.
-      if(BoosterOfficialLiveTest::enabled() && BoosterOfficialLiveTest::stopRequested()
+      // A Custom RPC already in flight when physical F1 revoked authority
+      // cannot override that Damping request or a later authorization epoch.
+      if(BoosterOfficialLiveTest::enabled() && !BoosterOfficialLiveTest::customModeAllowed(permission)
          && mode != booster::robot::RobotMode::kDamping)
       {
         client.ChangeMode(booster::robot::RobotMode::kDamping);
@@ -512,7 +513,8 @@ static void buttonEventHandler(const void* msg)
     {
       if(buttonEvent.event() == booster_interface::msg::PRESS_DOWN)
       {
-        const bool stopMatch = BoosterMatchSafety::enabled() && BoosterOfficialLiveTest::bodyAuthorized();
+        const bool stopMatch = !BoosterOfficialLiveTest::officialButtonMode()
+            && BoosterMatchSafety::enabled() && BoosterOfficialLiveTest::bodyAuthorized();
         if(BoosterMatchSafety::enabled())
           BoosterMatchSafety::invalidateConfirmation();
         BoosterOfficialLiveTest::observePhysicalF1Down(BoosterOfficialLiveTest::steadyTimeNs());
@@ -1479,11 +1481,12 @@ int main(int argc, char* argv[])
       BoosterMatchLogDirectory::prepare987();
       printf("K1_987_MATCH LOG_DIRECTORY_READY path=/home/booster/logs logger_recording_not_yet_verified=1\n");
       BoosterOfficialLiveTest::enable();
+      BoosterOfficialLiveTest::enableOfficialButtonMode();
       BoosterMatchSafety::enable();
       BoosterRemoteStand::enable();
       signal(SIGINT, sigHandlerOfficialLiveShutdown);
       signal(SIGTERM, sigHandlerOfficialLiveShutdown);
-      printf("K1_987_MATCH ENTRY GC_SOURCE=192.168.50.37 FRESH_F1_X_STOP NATIVE_GC_ENTRY READY_AUTO_HANDOFF MANUAL_OVERRIDE_ALLOWED NO_FIXED_RUNTIME_LIMIT\n");
+      printf("K1_987_MATCH ENTRY GC_SOURCE=192.168.50.37 OFFICIAL_F1_MODE_ONLY RESIDENT_APP NO_GLOBAL_X_STOP EXPLICIT_STOP_EXIT NATIVE_GC_ENTRY READY_AUTO_HANDOFF MANUAL_OVERRIDE_ALLOWED NO_FIXED_RUNTIME_LIMIT\n");
       printf("K1_987_MATCH FROM_996_37A2C4BA REMOTE_REMOVE_STAND_HOLD MANUAL_RECOVERY_INITIAL_READY_PLAY\n");
     }
     else if(officialLiveTest)
@@ -1630,8 +1633,21 @@ int main(int argc, char* argv[])
       // Listen to the F1 button on the K1 or to disconnected joints on the T1.
       if(settings.robotType == Settings::k1)
       {
-        buttonEventSubscriber.InitChannel();
-        emergencyHandler.setState(EmergencyHandler::noEmergency);
+        if(BoosterOfficialLiveTest::officialButtonMode())
+        {
+          // BEGIN_OFFICIAL_MODE_STARTUP
+          // Keep the official zero -> Custom connection probe -> Damping
+          // sequence, without granting motion authority. A real F1 event or
+          // process stop irrevocably cancels this token-zero startup purpose.
+          BoosterOfficialLiveTest::beginStartupConnection();
+          emergencyHandler.setState(EmergencyHandler::noEmergency);
+          buttonEventSubscriber.InitChannel(); // Do not overwrite a callback's F1 state afterwards.
+        }
+        else
+        {
+          buttonEventSubscriber.InitChannel();
+          emergencyHandler.setState(EmergencyHandler::noEmergency);
+        }
       }
       else
       {
@@ -1650,6 +1666,12 @@ int main(int argc, char* argv[])
       while(run && Time::getTimeSince(startTime) < 60000)
       {
         Thread::sleep(100);
+        if(BoosterOfficialLiveTest::officialButtonMode() && !BoosterOfficialLiveTest::stopRequested()
+           && !BoosterOfficialLiveTest::startupConnectionAllowed() && !BoosterOfficialLiveTest::bodyAuthorized())
+        {
+          printf("K1_OFFICIAL_BUTTON_MODE startup_probe_cancelled_by_physical_F1=1 resident_damping=1\n");
+          goto success;
+        }
         if(!client.GetMode(modeResponse) && modeResponse.mode_ == booster::robot::RobotMode::kCustom)
         {
           // When booting up, custom mode might be disabled again after a while. Wait a bit.
@@ -1684,12 +1706,16 @@ int main(int argc, char* argv[])
       return EXIT_FAILURE;
 
     success:
+      BoosterOfficialLiveTest::endStartupConnection();
       // Switch K1 back into damping mode
       if(settings.robotType == Settings::k1)
       {
         Thread::sleep(100);
-        emergencyHandler.setState(EmergencyHandler::emergencyReleased);
+        if(!BoosterOfficialLiveTest::officialButtonMode()
+           || (!BoosterOfficialLiveTest::bodyAuthorized() && emergencyHandler.state == EmergencyHandler::noEmergency))
+          emergencyHandler.setState(EmergencyHandler::emergencyReleased);
       }
+      // END_OFFICIAL_MODE_STARTUP
     }
 
     if(bhumanPid)

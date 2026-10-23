@@ -1,5 +1,11 @@
 # K1实体Pickup分支执行约定
 
+本轮新增用户授权（2026-10-24）：以987 v4@48ce90279f27f8a51680661f448184fb2f2ecb9b为基座，迁入977@1cf8bf14a6cc079999b807a946d6df31c528ed16的F1常驻功能并提交新分支。明确允许这次必要F1语义迁移，但不混入977身份、跨boot恢复、硬件策略或配置。分支codex/987-native-reentry-official-f1-resident-v1；本轮不SSH、不部署、不启动身体。先读Docs/K1_987_NATIVE_REENTRY_F1_RESIDENT_20261024.md；旧v4现场Pickup通过是基座历史，不冒充合并版身体通过。
+
+- F1卸力与显式stop退出分开；单X不再全局退出，RB+X仍原生映射。其它旧入口默认行为不变。
+- 常驻必须撤销旧Pickup/AUTO/手柄选择，不因长F1续旧动作；普通回场和定位保持v4，不再叠几何回场状态机。
+- 新APP/controller/说明/RELEASE必须同版；未完成pin时明确UNFINALIZED，不沿旧2ea1 APP冒充新模式。只提交源码/测试/脱敏元数据，不提交二进制、缓存、系统备份或真实manifest。
+
 2026-10-24用户新增验收：987当前v4已通过用户现场Pickup后回场测试，用户授权提交该版本。验收来源是operator_reported，不修改历史安装回执中NOT RUN，不扩大为全部比赛/网络/摆位场景验收。提交只含本分支源码、测试、当前987启动层文本与说明，不混996/977其它改动，不提交ELF/缓存/厂商原件/系统备份/凭据。详见Docs/K1_987_NATIVE_REENTRY_V4_20261024.md及Deploy/K1Match987/RELEASE.json。
 
 文件安装阶段记录（历史）：本分支为codex/987-pickup-native-reentry-v4，基座48fd18a。仅保留普通GC间隙修复与日志目录，原生定位/回场/Physical/Joystick/策略逐字v2，无v3几何状态机。完整ARM及405+41源码相机回归通过，APP2ea1b44/controllerbbfbc800已在987仅文件安装，260保护不变、缓存只重绑APP。当时未启动/运动/实测新轨迹，未提交推送；旧v3源码和失败证据保留。实际回执位于本轮root INSTALL_RECEIPT_987_V4.json和INSTALL_POST_VERIFIED_V4.json；后续用户验收以上段为准。

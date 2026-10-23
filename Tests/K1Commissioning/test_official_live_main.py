@@ -106,6 +106,7 @@ struct Client {
 struct Handler {
  std::atomic<bool> commissionOnly{false}; Client client;
  int changeMode(booster::robot::RobotMode mode) {
+ const unsigned permission = BoosterOfficialLiveTest::modeToken();
 ''' + normal_branch + r'''
  return 99;
  }
@@ -123,9 +124,9 @@ int main(int argc, char** argv) {
  return 0;
 }
 ''', (("enabled",), ("default",)))
-        first_stop_check = change.index("BoosterOfficialLiveTest::stopRequested()")
+        first_stop_check = change.index("BoosterOfficialLiveTest::customModeAllowed(permission)")
         rpc = change.index("const int result = client.ChangeMode(mode);")
-        post_check = change.index("BoosterOfficialLiveTest::stopRequested()", rpc)
+        post_check = change.index("BoosterOfficialLiveTest::customModeAllowed(permission)", rpc)
         self.assertLess(first_stop_check, rpc)
         self.assertLess(rpc, post_check)
 

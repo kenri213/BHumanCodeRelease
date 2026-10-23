@@ -17,7 +17,7 @@ namespace BoosterOfficialLiveTest
     constexpr unsigned f1Pending = 1u, f1Armed = 2u, f1Stopped = 4u;
     struct LiveState
     {
-      std::atomic<bool> active{false}, stopped{false};
+      std::atomic<bool> active{false}, stopped{false}, officialButtons{false}, startupConnection{false};
       std::atomic<unsigned> f1Authority{0}, f1CognitionFrame{0};
       std::atomic<std::uint64_t> f1CognitionFrames{0};
       std::atomic<std::int64_t> f1DownNs{0}, f1CognitionNs{0};
@@ -42,6 +42,12 @@ namespace BoosterOfficialLiveTest
 
   inline bool enabled() noexcept {return detail::liveStateStorage().active.load();}
   inline void enable() noexcept {detail::liveStateStorage().active.store(true);}
+  /** Only the explicitly selected 987 entry restores resident official F1
+   * mode switching. Older deployment/commission scopes are not broadened. */
+  inline void enableOfficialButtonMode() noexcept
+  {enable(); detail::liveStateStorage().officialButtons.store(true);}
+  inline bool officialButtonMode() noexcept
+  {return enabled() && detail::liveStateStorage().officialButtons.load();}
   inline void requestStop() noexcept
   {
     // Called by the signal handler too: never lock, allocate or do I/O here.
@@ -49,10 +55,29 @@ namespace BoosterOfficialLiveTest
     if(enabled())
     {
       detail::liveStateStorage().f1Authority.fetch_or(detail::f1Stopped);
+      detail::liveStateStorage().startupConnection.store(false);
       detail::liveStateStorage().stopped.store(true);
     }
   }
   inline bool stopRequested() noexcept {return enabled() && detail::liveStateStorage().stopped.load();}
+  inline unsigned modeToken() noexcept {return detail::liveStateStorage().f1Authority.load();}
+  /** One zero-command-only startup handshake, before Framework creation.
+   * Main calls begin only AFTER the official resetMotorCommands succeeded. */
+  inline void beginStartupConnection() noexcept
+  {
+    if(officialButtonMode() && !stopRequested() && modeToken() == 0)
+      detail::liveStateStorage().startupConnection.store(true);
+  }
+  inline void endStartupConnection() noexcept {detail::liveStateStorage().startupConnection.store(false);}
+  inline bool startupConnectionAllowed() noexcept
+  {return officialButtonMode() && !stopRequested() && modeToken() == 0 && detail::liveStateStorage().startupConnection.load();}
+  inline bool customModeAllowed(unsigned token) noexcept
+  {
+    if(!enabled()) return true;
+    if(stopRequested()) return false;
+    return !officialButtonMode() || (modeToken() == token
+        && ((token & 7u) == detail::f1Armed || (token == 0 && startupConnectionAllowed())));
+  }
 
   inline std::int64_t steadyTimeNs() noexcept
   {
@@ -65,6 +90,7 @@ namespace BoosterOfficialLiveTest
   {
     if(!enabled()) return;
     auto& value = detail::liveStateStorage();
+    value.startupConnection.store(false);
     value.f1DownNs.store(nowNs);
     unsigned previous = value.f1Authority.load();
     while(!(previous & detail::f1Stopped))
@@ -105,6 +131,11 @@ namespace BoosterOfficialLiveTest
     auto& value = detail::liveStateStorage();
     unsigned expected = value.f1Authority.load();
     if((expected & 7u) != detail::f1Pending) return false;
+    // Official mode uses the real physical SDK DOWN -> LONG event sequence,
+    // not an invented perception/ten-second authorization condition. The
+    // existing process stop latch and concurrent DOWN/UP generation still win.
+    if(officialButtonMode())
+      return value.f1Authority.compare_exchange_strong(expected, (expected & ~7u) | detail::f1Armed);
     const auto down = value.f1DownNs.load();
     const auto cognition = value.f1CognitionNs.load();
     if(down <= 0 || nowNs <= down || nowNs - down > 10000000000LL
@@ -123,9 +154,11 @@ namespace BoosterOfficialLiveTest
   template<typename Remote, typename RemoveEvent> void observeRemoteStopX(const Remote& input, RemoveEvent removeEvent)
   {
     if(!enabled()) return;
-    // X and corrupt axes remain real emergency stops, even in a REMOVE packet.
+    // In the official-button entry, X is ordinary native input, including
+    // RB+X -> the original KeyStates f1/unstiff mapping. It is not APP exit,
+    // and no X->Damping RPC is invented here. Corrupt axes remain a fault.
     if(!std::isfinite(input.lx()) || !std::isfinite(input.ly())
-       || !std::isfinite(input.rx()) || !std::isfinite(input.ry()) || input.x())
+       || !std::isfinite(input.rx()) || !std::isfinite(input.ry()) || (!officialButtonMode() && input.x()))
       requestStop();
     else if(input.event() == removeEvent)
     {
