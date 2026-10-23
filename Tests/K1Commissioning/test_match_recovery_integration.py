@@ -174,14 +174,14 @@ class MatchRecoveryIntegrationTests(unittest.TestCase):
         cls.temp=tempfile.TemporaryDirectory(prefix='bh996-recovery-integration-');cls.addClassCleanup(cls.temp.cleanup)
         physical=PHYSICAL.read_text();provider=PROVIDER.read_text()
         live=physical[physical.index('  const LiveGetUpGesture::Input liveInput{'):physical.index('  const bool wasHolding')]
-        combined=physical[physical.index('  bool getUpSticksNeutral = true;'):physical.index('  const bool combinedWasPending')]
+        combined=physical[physical.index('  bool getUpSticksNeutral = true;'):physical.index('  physicalPickupVisited = true;')]
         permission=physical[physical.index('  const bool matchRecoveryPermitted ='):physical.index('  const auto combinedPreviousReason')]
         publish=physical[physical.index('  if(combinedGetUp.cancelled)'):physical.index('  const bool combinedReasonChanged')]
         admission=provider[provider.index('  const bool combinedPreparePermitted ='):provider.index('  switch(gameState.playerState)')]
         getup=expression(physical,'if(matchRecoveryPermitted\n')
         source=PREFIX+live+combined+permission+'\nreturn {liveInput,combinedInput,matchRecoveryPermitted};}\n'
         source+='static bool providerAdmission(){const bool unstiffButtonsPressed=theEnhancedKeyStates.pressed[KeyStates::f1]||theDampingState.isDamping;\n'+admission+'\nreturn combinedPrepareAdmission;}\n'
-        source+='static void publish(const G::Input& combinedInput,const G::Result& combinedGetUp){\n'+publish+'\n}\n'
+        source+='static void publish(const G::Input& combinedInput,const G::Result& combinedGetUp){const bool pickupLyingHandover=false;\n'+publish+'\n}\n'
         source+='static bool finalGetUp(const Inputs& inputs,const G::Result& combinedGetUp){const bool matchRecoveryPermitted=inputs.recoveryPermitted;const bool liveGetUpRequested=false;return '+getup+';}\n'
         source+=SUFFIX
         cpp=Path(cls.temp.name)/'integration.cpp';cpp.write_text(source);cls.binary=Path(cls.temp.name)/'integration'

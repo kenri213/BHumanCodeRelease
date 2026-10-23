@@ -634,6 +634,15 @@ static bool parseCommissionSeconds(const char* text, unsigned& seconds)
   return true;
 }
 
+// 987 receives the 996 match behavior in its own hardware-bound entry.
+// Validate before any mode/SDK/configuration initialization. Do not broaden
+// the older 996/live/commissioning scopes or accept another project's Config.
+static bool match987IdentityAllowed(const std::string& actualSerial, const char* bhDir)
+{
+  return actualSerial == "1424725033885" && bhDir
+         && !strcmp(bhDir, "/home/booster/Workspace/BHuman_987_Match_20261023");
+}
+
 struct CommissionInputSnapshot
 {
   long long lowTime = -1;
@@ -1354,6 +1363,7 @@ int main(int argc, char* argv[])
   bool remoteStopX = false;
   bool officialLiveTest = false;
   bool officialMatchMode = false;
+  bool officialMatch987 = false;
   bool appSecondsSet = false;
   unsigned appSeconds = 600;
   unsigned commissionSeconds = 30;
@@ -1374,6 +1384,13 @@ int main(int argc, char* argv[])
         bhDir = argv[++i];
       else if(!strcmp(argv[i], "-w"))
         watchdog = true;
+      else if(!strcmp(argv[i], "--k1-987-match"))
+      {
+        if(officialLiveTest) return EXIT_FAILURE;
+        officialLiveTest = true;
+        officialMatchMode = true;
+        officialMatch987 = true;
+      }
       else if(!strcmp(argv[i], "--k1-996-live-test"))
       {
         if(officialLiveTest) return EXIT_FAILURE;
@@ -1448,7 +1465,25 @@ int main(int argc, char* argv[])
       fprintf(stderr, "APP_COMMISSION DENIED_REMOTE_STOP_SCOPE requires damping-only and explicit 1..180 seconds\n");
       return EXIT_FAILURE;
     }
-    if(officialLiveTest)
+    if(officialMatch987)
+    {
+      if(watchdog || commissionEmergencyOnly || commissionAppDampingOnly || remoteStopX
+         || commissionSecondsSet || appSecondsSet || commissionExpectedSerial)
+      {fprintf(stderr, "K1_987_MATCH DENIED_MIXED_SCOPE\n"); return EXIT_FAILURE;}
+      std::ifstream serialFile("/sys/firmware/devicetree/base/serial-number", std::ios::binary);
+      std::string actualSerial;
+      std::getline(serialFile, actualSerial, '\0');
+      if(!match987IdentityAllowed(actualSerial, bhDir))
+      {fprintf(stderr, "K1_987_MATCH DENIED_IDENTITY_OR_DIRECTORY\n"); return EXIT_FAILURE;}
+      BoosterOfficialLiveTest::enable();
+      BoosterMatchSafety::enable();
+      BoosterRemoteStand::enable();
+      signal(SIGINT, sigHandlerOfficialLiveShutdown);
+      signal(SIGTERM, sigHandlerOfficialLiveShutdown);
+      printf("K1_987_MATCH ENTRY GC_SOURCE=192.168.50.37 FRESH_F1_X_STOP NATIVE_GC_ENTRY READY_AUTO_HANDOFF MANUAL_OVERRIDE_ALLOWED NO_FIXED_RUNTIME_LIMIT\n");
+      printf("K1_987_MATCH FROM_996_37A2C4BA REMOTE_REMOVE_STAND_HOLD MANUAL_RECOVERY_INITIAL_READY_PLAY\n");
+    }
+    else if(officialLiveTest)
     {
       if(watchdog || commissionEmergencyOnly || commissionAppDampingOnly || remoteStopX
          || commissionSecondsSet || appSecondsSet || commissionExpectedSerial)

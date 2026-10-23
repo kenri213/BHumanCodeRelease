@@ -100,6 +100,7 @@ void SkillBehaviorControl::update(ActivationGraph&)
   }
 
   BoosterOfficialLiveTest::notePreviousPlayerState(static_cast<unsigned>(theExtendedGameState.playerStateLastFrame));
+  physicalPickupVisited = false;
   beginFrame(theFrameInfo.time);
   // The process-wide commissioning flag is set before Robot construction and
   // cannot be overridden by scenario, robot configuration, or remote buttons.
@@ -112,9 +113,10 @@ void SkillBehaviorControl::update(ActivationGraph&)
   else
     execute(root);
   endFrame();
+  if(!physicalPickupVisited) physicalPickupGate.suspend();
 
-  theMotionRequest.shouldInterceptBall = !commissioning && theInterceptBallInformation.intercept && !theBehaviorStateInformation.remoteControlActive;
-  theMotionRequest.shouldWalkOutOfBallLine = !commissioning && theInterceptBallInformation.walkOutOfBallPath && !theBehaviorStateInformation.remoteControlActive;
+  theMotionRequest.shouldInterceptBall = !commissioning && !BoosterPickupControl::held() && theInterceptBallInformation.intercept && !theBehaviorStateInformation.remoteControlActive;
+  theMotionRequest.shouldWalkOutOfBallLine = !commissioning && !BoosterPickupControl::held() && theInterceptBallInformation.walkOutOfBallPath && !theBehaviorStateInformation.remoteControlActive;
 
   theLibCheck.performCheck();
 }

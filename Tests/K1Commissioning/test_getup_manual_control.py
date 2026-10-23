@@ -29,6 +29,7 @@ def harness():
     cancellation = condition_after(source, "  // An explicit return to automatic")
     return r'''
 #include "Platform/BoosterMatchSafety.h"
+#include "Platform/BoosterPickupControl.h"
 #include <algorithm>
 #include <array>
 #include <cmath>

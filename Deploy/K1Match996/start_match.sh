@@ -4,6 +4,10 @@ action="${1:-start}"
 [[ "$#" -le 1 ]] || { echo 'Usage: start_match.sh [start|status|logs|stop|rollback]' >&2; exit 2; }
 case "$action" in
   start)
+    echo '提起前先承托提手，再按实体STAND锁PRE；PRE没有平衡能力，必须持续承托。F1/X是卸力，不是PRE。'
+    echo '直立摆回后松开旧键，新长按实体WALK超过2秒；真实Stand满300ms且当前裁判合法才交AUTO。'
+    echo '按WALK时若罚下、STOP、SET或裁判包不新鲜，只Stand；之后条件合法仍须松开，再新长按WALK。'
+    echo 'Pickup中若卧姿，走合法的新RB+A起身，仍先Stand、真实回中和LT交权，不自动AUTO。'
     echo '只接192.168.50.37裁判机。首发摆位推荐INITIAL；比赛卧姿恢复也支持READY/PLAY，须未罚下、非STOP/SET。首次启动显示10阶段；已运行时不重启服务。'
     echo '等 ready_for_operator=true 后：F1长按约2秒松开 → 摇杆回中 → 先按住RB再按A，两键长按约3秒松开，内部自动准备并起身。无需RB+B。'
     echo '起身后全松、摇杆回中即可遥控；回中停步。'

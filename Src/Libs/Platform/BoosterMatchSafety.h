@@ -38,6 +38,7 @@ namespace BoosterMatchSafety
       return previousInitial && !initial;
     }
     void arm() noexcept {wasInitial.store(true);}
+    void disarm() noexcept {wasInitial.store(false);}
   private:
     std::atomic<bool> wasInitial{true};
   };

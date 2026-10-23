@@ -111,4 +111,18 @@ namespace BoosterRemoteStand
     if((previous >> 4) != expectedGeneration || (previous & 15u) != required) return false;
     return packed.compare_exchange_strong(previous, previous & ~std::uint64_t{15});
   }
+
+  /** Only the physical Pickup gate calls this after fresh WALK and real stable Stand.
+   * It is not a synthetic LT choice and cannot clear a concurrent new REMOVE.
+   */
+  inline bool resumeFromPhysicalPickup(std::uint64_t expectedGeneration) noexcept
+  {
+    if(!enabled()) return true;
+    auto& value = detail::remoteStandStorage();
+    auto previous = value.packed.load();
+    if((previous >> 4) != expectedGeneration) return false;
+    if(!value.packed.compare_exchange_strong(previous, previous & ~std::uint64_t{15})) return false;
+    value.awaitingRecoveryStand.store(false);
+    return true;
+  }
 }

@@ -16,6 +16,7 @@
 #include "Platform/BHAssert.h"
 #include "Platform/BoosterAppCommissioning.h"
 #include "Platform/BoosterOfficialLiveTest.h"
+#include "Platform/BoosterPickupControl.h"
 #include "Platform/SystemCall.h"
 #include "Streaming/Global.h"
 #include "Tools/Motion/MotionUtilities.h"
@@ -96,7 +97,7 @@ void MotionEngine::update(JointRequest& jointRequest)
   // phase's normal stopping transition, never freeze joints or force Stand on
   // a robot that is lying, preparing, falling or getting up. Hard playDead and
   // fall requests, body disconnect and IMU/Cognition protections still win.
-  if(BoosterRemoteStand::held() && BoosterOfficialLiveTest::bodyAuthorized())
+  if((BoosterRemoteStand::held() || BoosterPickupControl::held()) && BoosterOfficialLiveTest::bodyAuthorized())
   {
     // These generators run later, also at phase boundaries. No interception
     // or ball-line escape may replace the hold, including during GetUp/Prepare.

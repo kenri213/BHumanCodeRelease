@@ -189,6 +189,16 @@ option((SkillBehaviorControl) HandleJoystick,
 
   common_transition
   {
+    if(BoosterPickupControl::consumeAutomaticRelease())
+    {
+      BoosterMatchSafety::cancelJoystickAfterGetUp();
+      goto inactive;
+    }
+    if(BoosterPickupControl::held())
+    {
+      BoosterMatchSafety::cancelJoystickAfterGetUp();
+      goto remoteLost;
+    }
     if(BoosterRemoteStand::held())
     {
       const auto generation = BoosterRemoteStand::generation();
@@ -231,7 +241,7 @@ option((SkillBehaviorControl) HandleJoystick,
     transition
     {
       if(joystickState.valid
-         && ((allPressed(activateButtons) && !theMotionInfo.isMotion(MotionPhase::playDead))
+         && ((BoosterPickupControl::manualTakeoverAllowed() && allPressed(activateButtons) && !theMotionInfo.isMotion(MotionPhase::playDead))
              || BoosterMatchSafety::consumeJoystickAfterGetUp(getUpManualReady)))
       {
         BoosterMatchSafety::cancelJoystickAfterGetUp();

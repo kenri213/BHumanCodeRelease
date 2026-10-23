@@ -76,6 +76,7 @@
 #include "Debugging/Annotation.h"
 #include "Framework/Module.h"
 #include "Platform/SystemCall.h"
+#include "Platform/BoosterPickupControl.h"
 #include <regex> // not needed in header, but would otherwise be broken by CABSL
 #include "Tools/BehaviorControl/Cabsl.h"
 
@@ -227,6 +228,8 @@ protected:
 
   unsigned timeWhenAnnouncedEmptySkillRequest = 0; /**< The last time when the robot said that its skill request is empty. */
   unsigned lastBallOutOfFieldWaitTimestamp = 0; /**< The last time HandleBallOutOfField was active. */
+  BoosterPickupControl::Gate physicalPickupGate; /**< Survives CABSL initial-state fallbacks. */
+  bool physicalPickupVisited = false;
 
   ArmMotionRequest theArmMotionRequest; /**< The arm motion request that is modified by the behavior. */
   BehaviorStateInformation theBehaviorStateInformation; /**< Information about the state transitions of the behavior. */

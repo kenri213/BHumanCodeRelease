@@ -340,7 +340,7 @@ class ProductionCombinedInputTests(unittest.TestCase):
         cls.addClassCleanup(cls.temp.cleanup)
         physical = PHYSICAL.read_text()
         begin = physical.index("  bool getUpSticksNeutral = true;")
-        end = physical.index("  const bool combinedWasPending", begin)
+        end = physical.index("  physicalPickupVisited = true;", begin)
         production_initializer = physical[begin:end]
         source = Path(cls.temp.name) / "wired.cpp"
         cls.binary = Path(cls.temp.name) / "wired"

@@ -68,6 +68,23 @@ class JoystickNeutralStandTests(unittest.TestCase):
 
     def test_only_one_production_predicate_changed(self):
         raw=SOURCE.read_bytes();addition=b' || walkSpeed == Pose2f()'
+        # Strip only the independently tested physical Pickup additive overlay.
+        pickup_overlay=b'''    if(BoosterPickupControl::consumeAutomaticRelease())
+    {
+      BoosterMatchSafety::cancelJoystickAfterGetUp();
+      goto inactive;
+    }
+    if(BoosterPickupControl::held())
+    {
+      BoosterMatchSafety::cancelJoystickAfterGetUp();
+      goto remoteLost;
+    }
+'''
+        self.assertEqual(raw.count(pickup_overlay),1)
+        raw=raw.replace(pickup_overlay,b'',1)
+        fresh_manual=b'BoosterPickupControl::manualTakeoverAllowed() && '
+        self.assertEqual(raw.count(fresh_manual),1)
+        raw=raw.replace(fresh_manual,b'',1)
         # Normalize only the separately exercised remote-loss overlay. Retain
         # the original official SHA below; do not replace it with this build's.
         self.assertEqual(raw.count(b'#include <cstdio>\n'),1)

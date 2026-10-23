@@ -79,6 +79,46 @@ option((SkillBehaviorControl) HandlePhysicalRobot,
                      && std::abs(theInertialData.gyro.z()) < maxGyroForWalk,
     .frameTime = theFrameInfo.time, .gcNow = liveInput.gcNow, .gcPacketTime = liveInput.gcPacketTime,
     .epoch = BoosterMatchSafety::epoch()};
+  physicalPickupVisited = true;
+  const BoosterPickupControl::Input pickupInput{
+    .enabled = liveMode && BoosterMatchSafety::enabled(), .authorized = liveAuthorized,
+    .emergency = combinedInput.emergency, .imuFinite = combinedInput.imuFinite,
+    .standOrWalk = theMotionInfo.executedPhase == MotionPhase::stand || theMotionInfo.executedPhase == MotionPhase::walk,
+    .executedPrepare = combinedInput.executedPrepare,
+    .actualStand = theMotionInfo.executedPhase == MotionPhase::stand,
+    // Native FallDownState intentionally reports pickedUp throughout Prepare.
+    // Use actual IMU stability there; the later real Stand requires upright.
+    .uprightStable = combinedInput.uprightStable
+        && (combinedInput.executedPrepare || theFallDownState.state == FallDownState::upright),
+    .gcLegal = !theGameState.stopped && theGameState.playerState == GameState::active
+        && CombinedLiveGetUpGesture::freshRecovery(theGameControllerData.state, combinedInput.stopped,
+             combinedInput.unpenalized, combinedInput.gcNow, combinedInput.gcPacketTime),
+    .frame = theFrameInfo.time, .epoch = combinedInput.epoch,
+    .remoteGeneration = BoosterRemoteStand::generation(), .buttons = BoosterPickupControl::physicalButtons()};
+  const auto pickup = physicalPickupGate.update(pickupInput);
+  BoosterPickupControl::setHeld(physicalPickupGate.active());
+  if(!pickupInput.enabled || !pickupInput.authorized || pickupInput.emergency || !pickupInput.gcLegal
+     || BoosterPickupControl::automaticReleaseEpoch() != pickupInput.epoch)
+    BoosterPickupControl::cancelAutomaticRelease();
+  const bool pickupLyingAttempt = physicalPickupGate.active() && combinedInput.lyingStable && combinedInput.canPrepare;
+  if(physicalPickupGate.active())
+  {
+    if(pickup.entered || !pickupLyingAttempt)
+    {
+      combinedGetUpGate = CombinedLiveGetUpGesture::Gate{};
+      CombinedLiveGetUpGesture::revokePrepare();
+    }
+    BoosterMatchSafety::cancelJoystickAfterGetUp();
+    BoosterMatchSafety::initialHandoff().disarm();
+    (void)BoosterMatchSafety::consumeJoystickRelease();
+    if(pickup.entered)
+    {
+      BoosterPickupControl::cancelAutomaticRelease();
+      BoosterPickupControl::requireFreshRemoteNeutral();
+      liveGetUpReleaseSeen = liveGetUpHolding = false;
+      std::printf("PHYSICAL_PICKUP entered_PRE physical_STAND=1 automatic_locked=1\n");
+    }
+  }
   const bool combinedWasPending = combinedGetUpGate.pending();
   // All physical Prepare exits in match mode share the same rule gate, not
   // just the new RB+A path. This permits self-recovery, not walking or kicking.
@@ -88,14 +128,28 @@ option((SkillBehaviorControl) HandlePhysicalRobot,
           && CombinedLiveGetUpGesture::freshRecovery(theGameControllerData.state, combinedInput.stopped,
                combinedInput.unpenalized, combinedInput.gcNow, combinedInput.gcPacketTime));
   const auto combinedPreviousReason = combinedGetUpGate.reason();
-  const auto combinedGetUp = combinedGetUpGate.update(combinedInput);
+  const auto combinedGetUp = physicalPickupGate.active() && !pickupLyingAttempt
+      ? CombinedLiveGetUpGesture::Result{} : combinedGetUpGate.update(combinedInput);
+  bool pickupLyingHandover = false;
+  if(physicalPickupGate.active() && pickupLyingAttempt && combinedGetUp.requestPrepare)
+  {
+    // Only the ORIGINAL fresh, lawful RB+A gate may leave the manual lock
+    // while lying. Rejoin its existing Prepare/GetUp path, never grant AUTO.
+    physicalPickupGate.yieldToLyingRecovery();
+    BoosterPickupControl::setHeld(false);
+    BoosterPickupControl::cancelAutomaticRelease();
+    BoosterPickupControl::requireFreshRemoteNeutral();
+    BoosterRemoteStand::beginBodyRecovery();
+    pickupLyingHandover = true;
+    std::printf("PHYSICAL_PICKUP LYING_RBA_TO_NATIVE fresh_original_gate=1 stand_handover_required=1\n");
+  }
   if(combinedGetUp.cancelled) CombinedLiveGetUpGesture::revokePrepare();
   if(combinedGetUp.requestPrepare || combinedGetUp.refreshPrepareAdmission)
   {
     CombinedLiveGetUpGesture::offerPrepare(theFrameInfo.time, combinedInput.epoch);
     if(combinedGetUp.requestPrepare)
     {
-      if(BoosterMatchSafety::enabled() && !combinedInput.rawInitial)
+      if(BoosterMatchSafety::enabled() && !combinedInput.rawInitial && !pickupLyingHandover)
         BoosterRemoteStand::beginBodyRecovery();
       std::printf("LIVE_COMBINED_GETUP_PREPARE fresh_RB_A_hold=2000 raw_gc=%u stable=1 recovery_hold=%d\n",
                   static_cast<unsigned>(theGameControllerData.state), BoosterRemoteStand::bodyRecoveryPending());
@@ -141,6 +195,22 @@ option((SkillBehaviorControl) HandlePhysicalRobot,
   {
     if(theSystemSensorData.emergencyMode || theGameState.playerState == GameState::unstiff)
       goto inactive;
+    else if(physicalPickupGate.active())
+    {
+      if(pickup.suspended) goto pickupNativeRecovery;
+      if(pickup.automaticReady && BoosterRemoteStand::resumeFromPhysicalPickup(pickupInput.remoteGeneration))
+      {
+        physicalPickupGate.finishAutomatic();
+        BoosterPickupControl::requireFreshRemoteNeutral();
+        BoosterPickupControl::setHeld(false);
+        BoosterPickupControl::offerAutomaticRelease(pickupInput.epoch);
+        BoosterMatchSafety::cancelJoystickAfterGetUp();
+        std::printf("PHYSICAL_PICKUP AUTO_RELEASE fresh_WALK=1 real_Stand_ms>=300 legal_GC=1\n");
+        goto active;
+      }
+      if(pickup.prepare) goto pickupPrepare;
+      goto pickupStand;
+    }
     else if(SystemCall::getMode() == SystemCall::simulatedRobot && theGameState.playerState != GameState::unstiff && theExtendedGameState.playerStateLastFrame == GameState::unstiff)
       goto active;
     else if((combinedGetUp.requestPrepare || combinedGetUp.refreshPrepareAdmission)
@@ -156,6 +226,40 @@ option((SkillBehaviorControl) HandlePhysicalRobot,
   // The remaining behavior is executed.
   initial_state(active)
   {}
+
+  state(pickupPrepare)
+  {
+    action
+    {
+      LookAtAngles({.pan = JointAngles::off, .tilt = JointAngles::off});
+      Prepare();
+    }
+  }
+
+  state(pickupStand)
+  {
+    action
+    {
+      LookForward();
+      Stand();
+    }
+  }
+
+  state(pickupNativeRecovery)
+  {
+    action
+    {
+      LookForward();
+      // Stand is only a normal request: native Fall/GetUp isDone keeps control
+      // until safe. Repeating FallRequest would trap a fall that was righted.
+      if(theMotionInfo.executedPhase == MotionPhase::prepare)
+        Prepare();
+      else if(theMotionInfo.executedPhase == MotionPhase::playDead)
+        PlayDead();
+      else
+        Stand();
+    }
+  }
 
   // The robot is inactive. This state can only be reached on Booster
   // robots and can only be left by pressing "stand".

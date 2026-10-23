@@ -6,13 +6,20 @@ Identity guards, helper/APP hashes, paths, service names, input-router originals
 and camera calibration must be bound and checked separately for each target.
 
 The reference APP SHA-256 is
-`37a2c4ba62a4e182aac542fe3aa8144793265ef1a6e8d6d9c4aa971388816c6e`.
+`0d54da25ec0c8165f8aa0648cc26019eed3b540d9e75638f1f296662dd4dfba9`.
 Only GameController source **192.168.50.37** is accepted by this source release.
 The reference is 115/team, player 2, SField; these settings are not credentials
 or a permission to override a target's configuration.
 
 ## Changes included
 
+- Physical Pickup withdrawal/re-entry is described in
+  `Docs/K1_PHYSICAL_PICKUP_STAND_20261024.md`. Support the handle before STAND:
+  Prepare is unbalanced. A new physical WALK hold can return upright placement
+  to automatic football only with legal fresh GameController permission and
+  actual stable Stand feedback. An invalid old intent never revives later.
+- A stable lying robot inside the Pickup hold needs the original fresh legal
+  RB+A recovery and subsequent neutral/LT handover; it is not an automatic return.
 - D455 RGB adapter with real intrinsics and timestamp/freshness checks.
 - Fresh physical F1 authorization and X/F1 emergency stop.
 - Native READY/SET/PLAY entry; no extra RB+Y localization confirmation.
@@ -47,8 +54,9 @@ commands. Firmware upgrade, installation and physical tests are separate steps.
 
 ## Validation and limitations
 
-The reviewed reference passed 262 source and 47 launcher offline tests and an
-isolated ARM64 build. No physical recovery/USB-loss or complete match acceptance
+This revision passed 348 source, 41 camera and 47 reference-launcher offline
+tests and a new complete ARM64 target build, followed by post-review recompilation
+and a frozen no-work check. No physical Pickup/USB-loss or complete match acceptance
 is claimed. Rebuilt ELF hashes can differ with build/debug paths: finalize all
 actual artifact pins and run `Tools/K1Commissioning/check_match_release.py`
 before deployment. Do not publish robot backups, private keys, credentials,

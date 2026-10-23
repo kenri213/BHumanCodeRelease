@@ -14,6 +14,7 @@
 #include "Framework/Settings.h"
 #include "Platform/BoosterAppCommissioning.h"
 #include "Platform/BoosterOfficialLiveTest.h"
+#include "Platform/BoosterPickupControl.h"
 #include "Platform/File.h"
 #include "Platform/SystemCall.h"
 #include "Platform/Time.h"
@@ -171,6 +172,7 @@ void BoosterProvider::buttonEventHandler(const booster_interface::msg::ButtonEve
   if(event == booster_interface::msg::PRESS_DOWN || event == booster_interface::msg::PRESS_UP)
   {
     const int button = buttonEvent.button();
+    BoosterPickupControl::observePhysicalButton(static_cast<unsigned>(button), event == booster_interface::msg::PRESS_DOWN);
     SYNC;
     buttonKeyStates.pressed[button == 2 ? KeyStates::walk
                                    : button == 1 ? KeyStates::stand
@@ -286,6 +288,9 @@ void BoosterProvider::remoteControllerStateHandler(const booster_interface::msg:
                           | (remoteControllerState.ls() ? 1024 : 0)   // left stick
                           | (remoteControllerState.rs() ? 2048 : 0);  // right right
     joystickState.valid = true;
+    bool neutralAxes = true;
+    for(float axis : joystickState.axes) neutralAxes &= std::isfinite(axis) && std::abs(axis) <= .1f;
+    BoosterPickupControl::observeRemoteSample(joystickState.buttons, neutralAxes);
   }
 }
 

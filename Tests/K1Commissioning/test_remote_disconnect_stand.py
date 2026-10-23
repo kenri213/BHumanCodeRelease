@@ -36,6 +36,7 @@ PREFIX=r'''
 #include "Platform/BoosterOfficialLiveTest.h"
 #include "Platform/BoosterAppCommissioning.h"
 #include "Platform/BoosterMatchSafety.h"
+#include "Platform/BoosterPickupControl.h"
 namespace R=BoosterRemoteStand;
 namespace C=BoosterOfficialLiveTest;
 static void check(bool value){if(!value)std::abort();}
@@ -226,8 +227,8 @@ class RemoteDisconnectStandTests(unittest.TestCase):
         source+='\nstatic void earlyRemoteCallback(const void* message)\n'+early
         source+='\nvoid BoosterProvider::remoteControllerStateHandler(const booster_interface::msg::RemoteControllerState& remoteControllerState)\n'+provider_body
         motion=(ROOT/'Src/Modules/MotionControl/MotionEngine/MotionEngine.cpp').read_text()
-        guard=body(motion,'if(BoosterRemoteStand::held() && BoosterOfficialLiveTest::bodyAuthorized()')
-        start=motion.index('if(BoosterRemoteStand::held() && BoosterOfficialLiveTest::bodyAuthorized()')
+        guard=body(motion,'if((BoosterRemoteStand::held() || BoosterPickupControl::held()) && BoosterOfficialLiveTest::bodyAuthorized()')
+        start=motion.index('if((BoosterRemoteStand::held() || BoosterPickupControl::held()) && BoosterOfficialLiveTest::bodyAuthorized()')
         predicate=motion[start:motion.index('{',start)]
         source+='\nstatic MotionRequest filterMotion(MotionRequest motionRequest,MotionPhase::Type type){\n'
         source+='struct Phase{MotionPhase::Type type;}value{type};const Phase* phase=&value;\n'+predicate+guard+'\nreturn motionRequest;}\n'
@@ -265,10 +266,14 @@ class RemoteDisconnectStandTests(unittest.TestCase):
 
     def test_996_main_enables_policy_only_inside_match_scope(self):
         source=MAIN.read_text();scope=body(source,'if(officialMatchMode)')
-        self.assertEqual(source.count('BoosterRemoteStand::enable();'),1)
+        self.assertEqual(source.count('BoosterRemoteStand::enable();'),2)
         self.assertIn('BoosterRemoteStand::enable();',scope)
         self.assertIn('actualSerial != "1424725032007"',source)
         self.assertIn('"--k1-996-match"',source)
+        target=body(source,'if(officialMatch987)\n    {')
+        self.assertEqual(target.count('BoosterRemoteStand::enable();'),1)
+        self.assertLess(target.index('match987IdentityAllowed(actualSerial, bhDir)'),
+                        target.index('BoosterRemoteStand::enable();'))
 
     def test_actual_behavior_hold_precedes_ready_handoff_and_automatic_options(self):
         source=(ROOT/'Src/Modules/BehaviorControl/SkillBehaviorControl/Options/HandleJoystick.cpp').read_text()
@@ -290,7 +295,7 @@ class RemoteDisconnectStandTests(unittest.TestCase):
 
     def test_motion_override_remains_below_hard_body_and_imu_protections(self):
         source=(ROOT/'Src/Modules/MotionControl/MotionEngine/MotionEngine.cpp').read_text()
-        guard=source.index('if(BoosterRemoteStand::held() && BoosterOfficialLiveTest::bodyAuthorized()')
+        guard=source.index('if((BoosterRemoteStand::held() || BoosterPickupControl::held()) && BoosterOfficialLiveTest::bodyAuthorized()')
         self.assertLess(guard,source.index('if(forceSitDown)',guard))
         self.assertLess(guard,source.index('theFallGenerator.shouldCatchFall',guard))
         self.assertLess(guard,source.index('MotionRobotHealth::bodyDisconnect',guard))
