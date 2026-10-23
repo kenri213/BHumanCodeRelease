@@ -41,6 +41,7 @@
 #include "Platform/BoosterAppCommissioning.h"
 #include "Platform/BoosterOfficialLiveTest.h"
 #include "Platform/BoosterMatchSafety.h"
+#include "Platform/BoosterMatchLogDirectory.h"
 #include "Platform/Semaphore.h"
 #include "Platform/SystemCall.h"
 #include "Platform/Thread.h"
@@ -1475,6 +1476,8 @@ int main(int argc, char* argv[])
       std::getline(serialFile, actualSerial, '\0');
       if(!match987IdentityAllowed(actualSerial, bhDir))
       {fprintf(stderr, "K1_987_MATCH DENIED_IDENTITY_OR_DIRECTORY\n"); return EXIT_FAILURE;}
+      BoosterMatchLogDirectory::prepare987();
+      printf("K1_987_MATCH LOG_DIRECTORY_READY path=/home/booster/logs logger_recording_not_yet_verified=1\n");
       BoosterOfficialLiveTest::enable();
       BoosterMatchSafety::enable();
       BoosterRemoteStand::enable();

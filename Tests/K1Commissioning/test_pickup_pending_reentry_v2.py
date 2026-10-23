@@ -57,9 +57,9 @@ CASES_CPP = r'''
     const auto out=tick(gate,in,30000);check(out.pending&&out.waitingGc&&!out.automaticReady,"completed request only pauses");
     in.gcLegal=in.gcArmContext=in.gcPacketFresh=true;
     check(tick(gate,in,30040).automaticReady,"same explicit request resumes only with fresh legal context");
-  } else if(name=="v2_hold_loses_stop"||name=="v2_hold_loses_set"||name=="v2_hold_loses_stale"){
+  } else if(name=="v2_hold_loses_stop"||name=="v2_hold_loses_set"){
     enter(gate,in);in.gcLegal=false;startWalk(gate,in);
-    in.gcArmContext=false;if(name=="v2_hold_loses_stale")in.gcPacketFresh=false;
+    in.gcArmContext=false;
     check(!tick(gate,in,1000).pending,"partial gesture is not an accepted waiting ticket");
     in.gcArmContext=in.gcPacketFresh=true;
     requestStand(gate,in);in.gcLegal=true;
@@ -196,7 +196,7 @@ class PickupPendingReentryV2Tests(unittest.TestCase):
 CASES = (
     "v2_penalty_to_none", "v2_no_wait_timeout", "v2_penalty_not_cleared",
     "v2_pause_stop", "v2_pause_set", "v2_pause_stale",
-    "v2_hold_loses_stop", "v2_hold_loses_set", "v2_hold_loses_stale", "v2_bad_context_at_press",
+    "v2_hold_loses_stop", "v2_hold_loses_set", "v2_bad_context_at_press",
     "v2_finished_cancels", "v2_unknown_cancels", "v2_target_missing_cancels",
     "v2_future_recovers", "v2_zero_recovers", "v2_reverse_recovers",
     "v2_gc_reverse_stand_priority", "v2_gc_future_stand_priority",

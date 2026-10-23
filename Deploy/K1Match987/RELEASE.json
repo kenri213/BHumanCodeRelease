@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "name": "987 minimal native pickup reentry v4",
+  "branch": "codex/987-pickup-native-reentry-v4",
+  "base_commit": "48fd18a05834b6f2165ef28ad47256655c50c7e9",
+  "official_reference_commit": "2e3374ba896da8288607f9a1881b876642fe18b8",
+  "target": {"robot": "987", "team": 114, "player": 1, "role": "goalkeeper", "location": "SField", "field_m": [9, 6], "gamecontroller_allowlist": ["192.168.50.37"]},
+  "app_sha256": "2ea1b44b0b600aad34d4860d5686a43f51752be82ade617dd09599bb08e67953",
+  "controller_sha256": "bbfbc80063b02c73bd121944708b1cac5e920c426f5c1d1f5ded2ec92918a5f8",
+  "route_core_sha256": "0cf7b635e2138ad34b195efdd97e96f08b48f8ff521ce15b6b55feba72b0e78a",
+  "build_evidence_sha256": "0c79290cd7b025785b142d76085c6e5b2d98b84b0500e014496ca9e7bafd0460",
+  "installation_receipt_sha256": "19be3e3c361655ca16dc52d0752215e15ebeb14043fe85a05c5642936b3df531",
+  "validation": {
+    "fresh_arm64_build": "passed",
+    "source_tests": 405,
+    "camera_tests": 41,
+    "controller_permission_tests": 93,
+    "release_tests": 15,
+    "protected_files_unchanged": 260,
+    "pickup_reentry": {"result": "passed", "date": "2026-10-24", "evidence_type": "operator_reported", "independent_log_verification": false, "scope": "Pickup后回场测试；不扩展为全部比赛和所有扰动场景验收"}
+  },
+  "cache_action": "same_robot_app_binding_only_no_rewarm",
+  "vendor_binaries_or_cache_included": false,
+  "complete_installer": false
+}

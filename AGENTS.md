@@ -1,5 +1,9 @@
 # K1实体Pickup分支执行约定
 
+2026-10-24用户新增验收：987当前v4已通过用户现场Pickup后回场测试，用户授权提交该版本。验收来源是operator_reported，不修改历史安装回执中NOT RUN，不扩大为全部比赛/网络/摆位场景验收。提交只含本分支源码、测试、当前987启动层文本与说明，不混996/977其它改动，不提交ELF/缓存/厂商原件/系统备份/凭据。详见Docs/K1_987_NATIVE_REENTRY_V4_20261024.md及Deploy/K1Match987/RELEASE.json。
+
+文件安装阶段记录（历史）：本分支为codex/987-pickup-native-reentry-v4，基座48fd18a。仅保留普通GC间隙修复与日志目录，原生定位/回场/Physical/Joystick/策略逐字v2，无v3几何状态机。完整ARM及405+41源码相机回归通过，APP2ea1b44/controllerbbfbc800已在987仅文件安装，260保护不变、缓存只重绑APP。当时未启动/运动/实测新轨迹，未提交推送；旧v3源码和失败证据保留。实际回执位于本轮root INSTALL_RECEIPT_987_V4.json和INSTALL_POST_VERIFIED_V4.json；后续用户验收以上段为准。
+
 先完整阅读`Docs/K1_PICKUP_SINGLE_WALK_REENTRY_20261024.md`；旧`Docs/K1_PHYSICAL_PICKUP_STAND_20261024.md`为v1历史。
 基座35b4d3为996实装37a2源码，本分支只补实体STAND退出/PRE锁定与新WALK合法回场，以及987已有身份入口。
 不得顺便迁入其它机器人的BodyGap、头隔离、反馈线程、路线或策略候选。

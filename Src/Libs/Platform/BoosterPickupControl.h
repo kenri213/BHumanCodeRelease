@@ -218,9 +218,12 @@ namespace BoosterPickupControl
       {intentLegal = false; lastReason = Reason::cancelledContext;}
       if(intentLegal && (in.gcTimestampInvalid || gcPacketReversed))
       {intentLegal = false; lastReason = Reason::cancelledClock;}
-      // Before the deliberate long press completes, STOP/SET/old packets revoke
-      // admission. After completion they only pause the explicit waiting ticket.
-      if(intentLegal && walkHolding && !in.gcArmContext)
+      // A normal packet gap cannot erase a WALK admitted by a fresh context.
+      // Fresh STOP/SET still revoke a partial gesture; zero/future/reversed
+      // stamps and the other hard invalidations above are never packet gaps.
+      const bool ordinaryPacketGap = !in.gcPacketFresh && in.gcPacketTime
+          && !in.gcTimestampInvalid && !gcPacketReversed;
+      if(intentLegal && walkHolding && !in.gcArmContext && !ordinaryPacketGap)
       {intentLegal = false; lastReason = Reason::cancelledContext;}
       if(walkHolding && in.frame - walkAt > 2000 && uprightAt && in.frame - uprightAt >= 300
          && ((in.executedPrepare && prepareAt && in.frame - prepareAt >= 2000)
