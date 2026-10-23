@@ -265,10 +265,16 @@ class RemoteDisconnectStandTests(unittest.TestCase):
 
     def test_996_main_enables_policy_only_inside_match_scope(self):
         source=MAIN.read_text();scope=body(source,'if(officialMatchMode)')
-        self.assertEqual(source.count('BoosterRemoteStand::enable();'),1)
+        self.assertEqual(source.count('BoosterRemoteStand::enable();'),2)
+        self.assertEqual(scope.count('BoosterRemoteStand::enable();'),1)
         self.assertIn('BoosterRemoteStand::enable();',scope)
         self.assertIn('actualSerial != "1424725032007"',source)
         self.assertIn('"--k1-996-match"',source)
+        target=body(source,'if(officialMatch977)\n    {')
+        self.assertEqual(target.count('BoosterRemoteStand::enable();'),1)
+        self.assertLess(target.index('match977IdentityAllowed(actualSerial, bhDir)'),
+                        target.index('BoosterRemoteStand::enable();'))
+        self.assertIn('return EXIT_FAILURE',target[:target.index('BoosterRemoteStand::enable();')])
 
     def test_actual_behavior_hold_precedes_ready_handoff_and_automatic_options(self):
         source=(ROOT/'Src/Modules/BehaviorControl/SkillBehaviorControl/Options/HandleJoystick.cpp').read_text()

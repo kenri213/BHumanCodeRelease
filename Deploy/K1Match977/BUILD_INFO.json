@@ -1,0 +1,109 @@
+{
+  "schema": 1,
+  "scope": "PUBLIC_SOURCE_REFERENCE_NOT_A_DEPLOYABLE_PAYLOAD",
+  "robot": "977",
+  "serial_identity_not_credential": "1424225066425",
+  "base_public_commit": "35b4d3cee3e8f3d8e8774a01f73cefde44ee0fd4",
+  "base_reference_996_app_sha256": "37a2c4ba62a4e182aac542fe3aa8144793265ef1a6e8d6d9c4aa971388816c6e",
+  "reference_977_app": {
+    "sha256": "c629b0c46d88077c0e5969da2a923de1f8e4127297209035e5c35980ac01f29f",
+    "bytes": 24741440,
+    "binary_in_repository": false,
+    "configuration": "Develop",
+    "compiler": "Clang 19.1.7, target aarch64-linux-gnu",
+    "byte_identical_rebuild_guaranteed": false
+  },
+  "private_source_build_report": {
+    "sha256": "9b93dc9f9bb19de20f41e83d26beac96314f10b0937047f87d3a431425e49d60",
+    "raw_report_published": false,
+    "reason": "Original contains machine-local paths and private deployment provenance; this public summary is a different document, not those original bytes."
+  },
+  "production_src_sha256": {
+    "Src/Apps/Booster/Main.cpp": "01d124149d754355e6315d79d5c33f9eabdd74d832697db7ca85db88006087cf",
+    "Src/Libs/Platform/BoosterOfficialLiveTest.h": "d6b597bd73c84744062c03b791569fd1fc1a78e7dbfd4a206fe8b5020339a806",
+    "Src/Modules/Infrastructure/BoosterProvider/BoosterProvider.cpp": "5414a5bbaff81c6dfcc4d8c1135de18fdbd57eaa528eaf7b0c71702e7b8ab7fd",
+    "Src/Modules/Infrastructure/GameStateProvider/GameStateProvider.cpp": "6604d0acee6691eaefd5f0a75fce11e6238e13a6dd2f771c5749221725683328"
+  },
+  "public_complete_src_manifest": {
+    "file": "PUBLIC_SOURCE_SHA256.json",
+    "sha256": "1b34048529aebb380ca731c475319a34cf615771ab71691228390a5c7e7d3c18",
+    "src_files": 985,
+    "unchanged_src_files_from_base": 981,
+    "production_files_byte_checked_against_private_frozen_report": true
+  },
+  "frozen_production_launcher_sha256": {
+    "match_control.py": "339b0f433c47c88f63be1d32208a6af9e4c8e739178655f183e91920d981e21b",
+    "route_transaction.py": "809c4414b634ee2a1a7dccf4dd0955c732c509cbfd89c17811ef354326a9a723",
+    "start_match.sh": "4998919d1b02fb575bdd1c2c5b00490551134ba92d7ea396844911819c54171e",
+    "install_update.py": "3cc484d8fc43f2c0a637a2de5ed646161c29f058828fa965e59c3e882aa1dffe"
+  },
+  "reference_artifact_pins_not_bundled": {
+    "bundle_manifest": "0df66d31d3201bd64e6d70365d57200b58f75da841ffe41b52035e37ebc35f1a",
+    "mode_query_helper": "a18e3cf4ef5819281f033107e7127a2462b00a1b72051c3f9853f7d14da2cc35",
+    "damping_helper": "178db53a658138094ab7806b08b26ff4ff326b37c584c50c3d0e2569cb1b9838",
+    "observer_helper": "bb4cd4bfb128f08c314a965f2fb0d23661a64aad08a722996b462add026c639c",
+    "realsense_sdk": "7308f5ef76a302d803d435975acf7772814c631dfd952077af2a43d0f816d169"
+  },
+  "runtime_selection_not_generic_repository_defaults": {
+    "team": 114,
+    "player": 1,
+    "role": "goalkeeper",
+    "location": "SField",
+    "scenario": "K1RealSense",
+    "game_controller_source": "192.168.50.37",
+    "settings_example_auto_loaded": false,
+    "private_calibration_included": false
+  },
+  "semantics": {
+    "physical_f1": "Emergency/Damping and long-release Unstiff changes within resident APP; no automatic Prepare/GetUp",
+    "single_x": "No invented global process exit",
+    "rb_x": "Original KeyStates f1/unstiff mapping retained",
+    "explicit_stop": "Process exit plus own-resource recovery",
+    "remote_disconnect": "Original 996 Stand hold; no AUTO continuity exception"
+  },
+  "not_included_features": [
+    "physical Pickup/PRE/WALK re-entry additions",
+    "BodyGap grading",
+    "head-isolation state machine",
+    "new low-state receive thread",
+    "new team/attack strategy",
+    "boot preloading or startup acceleration",
+    "watchdog -w deployment or acceptance"
+  ],
+  "validation_record": {
+    "frozen_source_commissioning_tests": 277,
+    "frozen_realsense_tests": 41,
+    "frozen_targeted_mode_tests": 31,
+    "public_checkout_commissioning_tests": 286,
+    "public_checkout_realsense_tests": 41,
+    "public_launcher_tests": 146,
+    "helper_cpu_policy_checks": 13,
+    "counts_are_not_disjoint_physical_trials": true,
+    "physical_f1_same_pid_mode_cycle": "0 -> 3 -> 0 verified on 977",
+    "new_build_getup_walk_kick_match_acceptance": "NOT PERFORMED",
+    "program_stopped_after_recorded_validation": true,
+    "publication_performs_robot_actions": false
+  },
+  "assembly_required": true,
+  "public_checkout_validation": {
+    "commissioning_tests_passed": 286,
+    "realsense_tests_passed": 41,
+    "launcher_tests_passed": 146,
+    "helper_policy_checks_passed": 13,
+    "all_985_production_sources_match_reference": true,
+    "new_arm_build_during_publication": false,
+    "robot_access_during_publication": false,
+    "note": "The 9 portable production-path tests are included in 286; do not count them twice. The existing ARM build and real F1 evidence remain separately scoped."
+  },
+  "unassembled_repository_is_not_installation_authority": true,
+  "excluded_new_material": [
+    "credentials and locally collected keys",
+    "APP/helper ELF and vendor libraries",
+    "firmware and system backups",
+    "robot-specific calibration",
+    "TensorRT/ORT caches and cache proofs",
+    "robot journals and raw telemetry",
+    "raw machine-local build and deployment reports"
+  ],
+  "upstream_history_note": "Existing upstream Install/Keys and profiles are retained as history; no new local key is copied, and this summary does not claim the repository history contains no key."
+}

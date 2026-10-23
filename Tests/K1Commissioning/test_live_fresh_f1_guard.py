@@ -36,6 +36,7 @@ PREAMBLE = r'''
 #include "Platform/BoosterMatchSafety.h"
 #undef state
 #include <array>
+#include <cstdio>
 #include <cstdlib>
 #include <limits>
 #include <stdexcept>
@@ -302,6 +303,8 @@ int main(int argc, char** argv) {
         zero_lambda = block(finish, "const auto writeUnarmedLiveZero = [&]") + ";"
         guard = block(finish, "if(BoosterOfficialLiveTest::enabled() && !BoosterOfficialLiveTest::bodyAuthorized())")
         harness = PREAMBLE + r'''
+#define SYNC
+namespace booster::robot {enum class RobotMode {kCustom, kDamping, kUnknown};}
 namespace booster_interface::msg {enum Serial {SERIAL = 17};}
 namespace Main {unsigned stops = 0; void stopOfficialLiveTest() {++stops;}}
 struct Motor {
@@ -334,6 +337,7 @@ struct Publisher {
 };
 struct Provider {
   Command lowCmd; Publisher lowCmdPublisher;
+  booster::robot::RobotMode robotMode = booster::robot::RobotMode::kCustom;
   struct {unsigned executedPhase = 3;} theMotionInfo;
   unsigned normalWrites = 0;
   void finish(bool revokeDuringCalculation = false) {

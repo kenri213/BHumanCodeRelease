@@ -1,0 +1,9 @@
+// Reference only; not auto-loaded. Preserve the target's actual private configuration.
+// This example is 977's explicit runtime selection, NOT the repository default.
+teamNumber = 114;
+fieldPlayerColor = blue;
+goalkeeperColor = red;
+playerNumber = 1;
+location = SField;
+scenario = K1RealSense;
+magicNumber = 114;

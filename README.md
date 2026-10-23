@@ -1,5 +1,12 @@
 # B-Human Code Release
 
+This branch contains the MDFZ K1/D455 **977 official-F1 resident-mode** source snapshot,
+not an unmodified official deployment or a ready-to-run multi-robot installation package.
+See [977 release and verification boundaries](Docs/K1_977_OFFICIAL_F1_RESIDENT_20261024.md)
+and [977 deployment reference](Deploy/K1Match977/README_MATCH.md).
+
+Upstream project description:
+
 This is the official 2026 B-Human code release. Documentation can be found [here](https://docs.b-human.de/coderelease2026/).
 
 B-Human is a research project. We provide the software as is. We release it as a snapshot of our internal repository on a yearly basis. You can build on this software, but you have to make do with the documentation we released. You may report bugs or problems with newer releases of operating systems or the tools used by opening a GitHub issue. We might give hints on how to solve these problems if we also ran into them since the code release. Do not write emails to the team or any of its members directly. They will not be answered.

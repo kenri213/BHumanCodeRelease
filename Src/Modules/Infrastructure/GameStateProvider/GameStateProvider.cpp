@@ -67,7 +67,8 @@ void GameStateProvider::update(GameState& gameState)
     timeWhenStateNotAfterHalf = theFrameInfo.time;
 
   gameState.whistled = false;
-  const bool unstiffButtonsPressed = theEnhancedKeyStates.pressed[KeyStates::f1] || theDampingState.isDamping;
+  const bool unstiffButtonsPressed = theEnhancedKeyStates.pressed[KeyStates::f1] || theDampingState.isDamping
+      || (BoosterOfficialLiveTest::officialButtonMode() && !BoosterOfficialLiveTest::bodyAuthorized());
   bool mainButtonPressed = !theDampingState.isDamping && ((
                              theEnhancedKeyStates.hitStreak[KeyStates::stand] == 1 && theEnhancedKeyStates.pressedDuration[KeyStates::stand] < ignoreMainButtonPressDuration)
                            || (theEnhancedKeyStates.hitStreak[KeyStates::walk] == 1 && theEnhancedKeyStates.pressedDuration[KeyStates::walk] < ignoreMainButtonPressDuration));

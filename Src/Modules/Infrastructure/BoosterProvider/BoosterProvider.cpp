@@ -449,8 +449,23 @@ void BoosterProvider::finishFrame2()
       VERIFY(lowCmdPublisher.Write(&lowCmd));
     return;
   }
+  if(BoosterOfficialLiveTest::officialButtonMode())
+  {
+    SYNC;
+    if(robotMode == booster::robot::RobotMode::kDamping) return;
+  }
   const auto writeUnarmedLiveZero = [&]
   {
+    // F1 mode hold is not process shutdown. In actual non-Custom mode the
+    // resident handler owns Damping; repeating a LowCmd Write here may be
+    // rejected by the SDK and must not convert F1 into an APP stop.
+    bool modeTransitionMayRejectWrite = false;
+    if(BoosterOfficialLiveTest::officialButtonMode())
+    {
+      SYNC;
+      if(robotMode == booster::robot::RobotMode::kDamping) return;
+      modeTransitionMayRejectWrite = robotMode == booster::robot::RobotMode::kCustom;
+    }
     struct StopOnFailedZeroOutput
     {
       bool completed = false;
@@ -463,10 +478,22 @@ void BoosterProvider::finishFrame2()
         }
       }
     } attempt;
-    if(!BoosterAppCommissioning::zeroLowCommand(lowCmd, booster_interface::msg::SERIAL)
-       || !lowCmdPublisher.Write(&lowCmd))
+    if(!BoosterAppCommissioning::zeroLowCommand(lowCmd, booster_interface::msg::SERIAL))
       return;
+    const bool written = lowCmdPublisher.Write(&lowCmd);
+    if(!written && !modeTransitionMayRejectWrite) return;
     attempt.completed = true;
+    if(!written)
+    {
+      static thread_local bool reported = false;
+      static thread_local unsigned reportedToken = 0;
+      const auto token = BoosterOfficialLiveTest::modeToken();
+      if(!reported || token != reportedToken)
+      {
+        std::fprintf(stderr, "K1_OFFICIAL_BUTTON_MODE unarmed_zero_write_rejected=1 authority=%u action=resident_damping_handler\n", token);
+        reported = true; reportedToken = token;
+      }
+    }
     BoosterOfficialLiveTest::noteOutput(static_cast<unsigned>(theMotionInfo.executedPhase), 0.f);
   };
   if(BoosterOfficialLiveTest::enabled() && !BoosterOfficialLiveTest::bodyAuthorized())
@@ -530,6 +557,11 @@ void BoosterProvider::finishFrame2()
   {
     writeUnarmedLiveZero();
     return; // A physical F1 DOWN may revoke authority during the PD calculation.
+  }
+  if(BoosterOfficialLiveTest::officialButtonMode())
+  {
+    SYNC;
+    if(robotMode == booster::robot::RobotMode::kDamping) return;
   }
   VERIFY(lowCmdPublisher.Write(&lowCmd));
   if(BoosterOfficialLiveTest::enabled())

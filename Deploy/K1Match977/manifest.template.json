@@ -1,0 +1,71 @@
+{
+  "schema": 1,
+  "action": "offline_controller_isolation_prepare_only",
+  "routing_policy": "official_two_patch_remote_library_only",
+  "patch_location_count": 2,
+  "release_status": "UNFROZEN_977_POST_REFLASH_EVIDENCE_REQUIRED",
+  "targets": {
+    "device_gateway": {
+      "firmware_target_hint": "/opt/booster/bin/container/device_gateway",
+      "expected_original_sha256": null,
+      "original": {
+        "path": "originals/device_gateway",
+        "sha256": null,
+        "bytes": null
+      },
+      "patched": {
+        "path": "patched/device_gateway",
+        "sha256": null,
+        "bytes": null
+      },
+      "patches": [
+        {
+          "byte_offset": null,
+          "changed_byte_offsets": null,
+          "old_topic": "rt/button_event",
+          "new_topic": "rt/button_even2"
+        }
+      ],
+      "source_identity": {
+        "mode": null
+      },
+      "approved_original_metadata": null,
+      "approved_metadata_provenance": null,
+      "captured_source_path": null,
+      "captured_source_identity": null,
+      "captured_source_parent_identity": null,
+      "metadata_semantics": "UNFROZEN: captured_source_* describes only a local private copy; approved_original_metadata must come from independent 977 post-reflash live SHA/uid/gid/mode/bytes evidence."
+    },
+    "remote_library": {
+      "firmware_target_hint": "/opt/booster/lib/libremote_controller.so",
+      "expected_original_sha256": null,
+      "original": {
+        "path": "originals/libremote_controller.so",
+        "sha256": null,
+        "bytes": null
+      },
+      "patched": {
+        "path": "patched/libremote_controller.so",
+        "sha256": null,
+        "bytes": null
+      },
+      "patches": [
+        {
+          "byte_offset": null,
+          "changed_byte_offsets": null,
+          "old_topic": "rt/remote_controller_state",
+          "new_topic": "rt/remote_controller_stat2"
+        }
+      ],
+      "source_identity": {
+        "mode": null
+      },
+      "approved_original_metadata": null,
+      "approved_metadata_provenance": null,
+      "captured_source_path": null,
+      "captured_source_identity": null,
+      "captured_source_parent_identity": null,
+      "metadata_semantics": "UNFROZEN: captured_source_* describes only a local private copy; approved_original_metadata must come from independent 977 post-reflash live SHA/uid/gid/mode/bytes evidence."
+    }
+  }
+}
