@@ -80,6 +80,10 @@ option((SkillBehaviorControl) HandlePhysicalRobot,
     .frameTime = theFrameInfo.time, .gcNow = liveInput.gcNow, .gcPacketTime = liveInput.gcPacketTime,
     .epoch = BoosterMatchSafety::epoch()};
   physicalPickupVisited = true;
+  const bool pickupPacketFresh = combinedInput.gcPacketTime > 0 && combinedInput.gcNow >= combinedInput.gcPacketTime
+      && combinedInput.gcNow - combinedInput.gcPacketTime <= 2000;
+  const bool pickupTargetPresent = BoosterPickupControl::ownPlayerPresent(theGameControllerData,
+      Global::getSettings().teamNumber, Global::getSettings().playerNumber);
   const BoosterPickupControl::Input pickupInput{
     .enabled = liveMode && BoosterMatchSafety::enabled(), .authorized = liveAuthorized,
     .emergency = combinedInput.emergency, .imuFinite = combinedInput.imuFinite,
@@ -93,9 +97,31 @@ option((SkillBehaviorControl) HandlePhysicalRobot,
     .gcLegal = !theGameState.stopped && theGameState.playerState == GameState::active
         && CombinedLiveGetUpGesture::freshRecovery(theGameControllerData.state, combinedInput.stopped,
              combinedInput.unpenalized, combinedInput.gcNow, combinedInput.gcPacketTime),
-    .frame = theFrameInfo.time, .epoch = combinedInput.epoch,
+    .gcArmContext = pickupPacketFresh && pickupTargetPresent && !combinedInput.stopped
+        && (combinedInput.rawInitial || combinedInput.rawRecoveryAllowed),
+    .gcPacketFresh = pickupPacketFresh, .gcTargetPresent = pickupTargetPresent,
+    .gcSessionEnded = pickupPacketFresh
+        && !(combinedInput.rawInitial || combinedInput.rawRecoveryAllowed || theGameControllerData.state == STATE_SET),
+    .gcTimestampInvalid = combinedInput.gcPacketTime == 0 || combinedInput.gcNow < combinedInput.gcPacketTime,
+    .frame = theFrameInfo.time, .gcPacketTime = combinedInput.gcPacketTime, .epoch = combinedInput.epoch,
     .remoteGeneration = BoosterRemoteStand::generation(), .buttons = BoosterPickupControl::physicalButtons()};
+  const auto pickupReasonBefore = physicalPickupGate.reason();
   const auto pickup = physicalPickupGate.update(pickupInput);
+  int pickupRawPenalty = -1;
+  if(pickupTargetPresent)
+    for(const auto& team : theGameControllerData.teams)
+      if(team.teamNumber == Global::getSettings().teamNumber)
+        pickupRawPenalty = team.players[Global::getSettings().playerNumber - 1].penalty;
+  if(pickupInput.enabled && (pickupReasonBefore != physicalPickupGate.reason() || pickup.requested || pickup.cancelled))
+    std::printf("PHYSICAL_PICKUP transition reason=%s requested=%d pending=%d waiting_gc=%d released=0 cancelled=%d walk_press=%u buttons=%u raw_gc=%u penalty=%d unpenalized=%d active=%d arm_context=%d gc_age_ms=%u phase=%u epoch=%llu remote_generation=%llu\n",
+        BoosterPickupControl::reasonName(physicalPickupGate.reason()), pickup.requested, pickup.pending,
+        pickup.waitingGc, pickup.cancelled, pickupInput.buttons.walkPress(),
+        static_cast<unsigned>(pickupInput.buttons.value & 3u), static_cast<unsigned>(theGameControllerData.state),
+        pickupRawPenalty, combinedInput.unpenalized, theGameState.playerState == GameState::active,
+        pickupInput.gcArmContext, combinedInput.gcNow >= combinedInput.gcPacketTime
+          ? combinedInput.gcNow - combinedInput.gcPacketTime : ~0u,
+        static_cast<unsigned>(theMotionInfo.executedPhase), static_cast<unsigned long long>(pickupInput.epoch),
+        static_cast<unsigned long long>(pickupInput.remoteGeneration));
   BoosterPickupControl::setHeld(physicalPickupGate.active());
   if(!pickupInput.enabled || !pickupInput.authorized || pickupInput.emergency || !pickupInput.gcLegal
      || BoosterPickupControl::automaticReleaseEpoch() != pickupInput.epoch)
@@ -205,7 +231,10 @@ option((SkillBehaviorControl) HandlePhysicalRobot,
         BoosterPickupControl::setHeld(false);
         BoosterPickupControl::offerAutomaticRelease(pickupInput.epoch);
         BoosterMatchSafety::cancelJoystickAfterGetUp();
-        std::printf("PHYSICAL_PICKUP AUTO_RELEASE fresh_WALK=1 real_Stand_ms>=300 legal_GC=1\n");
+        std::printf("PHYSICAL_PICKUP AUTO_RELEASE released=1 pending=0 walk_press=%u buttons=%u penalty=%d unpenalized=%d real_Stand_ms>=300 legal_GC=1 phase=%u epoch=%llu remote_generation=%llu\n",
+            pickupInput.buttons.walkPress(), static_cast<unsigned>(pickupInput.buttons.value & 3u),
+            pickupRawPenalty, combinedInput.unpenalized, static_cast<unsigned>(theMotionInfo.executedPhase),
+            static_cast<unsigned long long>(pickupInput.epoch), static_cast<unsigned long long>(pickupInput.remoteGeneration));
         goto active;
       }
       if(pickup.prepare) goto pickupPrepare;

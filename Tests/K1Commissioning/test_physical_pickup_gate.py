@@ -42,6 +42,7 @@ static void check(bool value, const char* why) {
 static P::Input good(unsigned frame = 100) {
   P::Input in;
   in.enabled = in.authorized = in.imuFinite = in.standOrWalk = in.uprightStable = in.gcLegal = true;
+  in.gcArmContext = in.gcPacketFresh = in.gcTargetPresent = true;
   in.emergency = false;in.frame = frame;in.epoch = 7;in.remoteGeneration = 13;
   in.buttons = P::physicalButtons();return in;
 }
@@ -152,8 +153,8 @@ int main(int argc, char** argv) {
     check(tick(gate, in, 2500).prepare, "upright stability needs continuous 300ms");
     requestStand(gate, in, 2501);
   } else if(name == "illegal_walk_later_legal") {
-    enter(gate, in);in.gcLegal = false;startWalk(gate, in);requestStand(gate, in);
-    in.gcLegal = true;check(!tick(gate, in, 2300).automaticReady, "later legal GC cannot legalize old WALK");
+    enter(gate, in);in.gcLegal = in.gcArmContext = false;startWalk(gate, in);requestStand(gate, in);
+    in.gcLegal = in.gcArmContext = true;check(!tick(gate, in, 2300).automaticReady, "later legal GC cannot legalize an unarmed old WALK");
     check(!tick(gate, in, 10000).automaticReady && gate.active(), "no delayed automatic revival");
     release(2);tick(gate, in, 10030);startWalk(gate, in, 10060);
     check(!tick(gate, in, 12060).automaticReady, "new WALK strict 2s");
@@ -162,9 +163,16 @@ int main(int argc, char** argv) {
     // when this new WALK hold completes, not from the old Stand timestamp.
     check(!tick(gate, in, 12360).automaticReady, "new successful WALK must still confirm 300ms Stand");
     check(tick(gate, in, 12361).automaticReady, "new legal WALK and new Stand interval may release");
-  } else if(name == "gc_gap_revokes_ticket" || name == "epoch_revokes_ticket" || name == "remote_generation_revokes_ticket") {
+  } else if(name == "gc_gap_pauses_completed_ticket") {
     enter(gate, in);startWalk(gate, in);requestStand(gate, in);tick(gate, in, 2230);
-    if(name == "gc_gap_revokes_ticket") in.gcLegal = false;
+    in.gcLegal = in.gcArmContext = in.gcPacketFresh = false;
+    const auto waiting = tick(gate, in, 2300);
+    check(waiting.pending && waiting.waitingGc && !waiting.automaticReady, "old GC pauses a completed request");
+    check(tick(gate, in, 30000).pending, "completed request has no arbitrary wait timeout");
+    in.gcLegal = in.gcArmContext = in.gcPacketFresh = true;
+    check(tick(gate, in, 30040).automaticReady, "fresh legal GC may complete the same explicit WALK");
+  } else if(name == "epoch_revokes_ticket" || name == "remote_generation_revokes_ticket") {
+    enter(gate, in);startWalk(gate, in);requestStand(gate, in);tick(gate, in, 2230);
     if(name == "epoch_revokes_ticket") ++in.epoch;
     if(name == "remote_generation_revokes_ticket") ++in.remoteGeneration;
     check(!tick(gate, in, 2300).automaticReady, "intervening evidence invalidates ticket");
@@ -428,7 +436,7 @@ CASES = (
     "withdraw_gc_illegal", "withdraw_remote_unrelated", "withdraw_normal_walk",
     "held_before_authorization", "no_authority", "disabled", "emergency", "imu_invalid", "unsafe_phase",
     "legal_walk_to_auto", "walk_duration_boundary", "actual_prepare_time", "prepare_continuity", "upright_continuity",
-    "illegal_walk_later_legal", "gc_gap_revokes_ticket", "epoch_revokes_ticket", "remote_generation_revokes_ticket",
+    "illegal_walk_later_legal", "gc_gap_pauses_completed_ticket", "epoch_revokes_ticket", "remote_generation_revokes_ticket",
     "new_stand_revokes_ticket", "walk_held_before_withdrawal", "simultaneous_stand_walk",
     "walk_release_cancels_hold", "frame_reversal_cancels_hold", "frame_gap_cancels_hold", "duplicate_frame_cancels_hold",
     "suspend_retains_withdrawal", "cached_remote_takeover", "unsafe_walk_cannot_arm", "unsafe_walk_phase_boundary", "global_holders",
